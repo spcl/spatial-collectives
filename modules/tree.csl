@@ -1,0 +1,195 @@
+const ctrl_module = @import_module("modules/ctrl_module.csl");
+
+param color_1: color;
+param color_2: color;
+
+param pe_id: u32;
+
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param NUM_PES: u32;
+const rev_id: u32 = NUM_PES - pe_id - 1;
+const in_color = comptime get_in_color(pe_id, rev_id);
+const out_color = comptime get_out_color(pe_id, rev_id);
+const step: u32 = 2;
+const cnt_color: u32 = comptime get_cnt_color(pe_id);
+const is_ctrl = comptime send_ctrl(pe_id, rev_id);
+
+var rcvd_cnt: u32 = 0;
+
+var invalid_f32 = @zeros([1]f32);
+var activate: color;
+var snd_visited: bool = false;
+var ctrl_mem_loc = @constants([1]u32, comptime ctrl_module.ctrl(true, ctrl_module.opcode_switch_advance, 0x00));
+
+
+var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = out_color, .advance_switch = if (!is_ctrl) true else false, .output_queue = @get_output_queue(comptime get_out_q_id())});
+var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = in_color, .input_queue = @get_input_queue(comptime get_in_q_id())});
+var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
+var ctrl = @get_dsd(fabout_dsd, .{.extent = 1, .fabric_color = out_color, .control = true, .output_queue = @get_output_queue(comptime get_out_q_id())});
+var ctrl_mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> ctrl_mem_loc[i] });
+
+
+fn get_rev_id(pe_id: u32) u32{
+  return NUM_PES - pe_id - 1;
+}
+
+fn get_cnt_color(pe_id: u32) u32 {
+  var i: u32 = 0;
+  var pow: u32 = 1;
+
+  while (pow <= NUM_PES) : (pow *= 2) {
+    if (pe_id & pow != 0) {
+      i += 1;
+    }
+  }
+
+  return i;
+}
+
+fn get_in_color(pe_id: u32, rev_id: u32) color{
+  if (cnt_color % 2 == 0) {
+    return color_1;
+  }
+
+  return color_2;
+}
+
+fn get_out_color(pe_id: u32, rev_id: u32) color{
+  if (cnt_color % 2 == 0) {
+    return color_2;
+  }
+
+  return color_1;
+}
+
+fn get_in_q_id() u32 {
+  if (pe_id % 2 == 0) {
+    return 3;
+  }
+
+  return 2;
+}
+
+fn get_out_q_id() u32 {
+  if (pe_id % 2 == 0) {
+    return 2;
+  }
+
+  return 3;
+}
+
+fn recv_count(pe_id: u32, rev_id: u32) u32 {
+  var i: u32 = 0;
+  var pow: u32 = 1;
+  
+  if (pe_id > 0) {
+    while (rev_id & pow != 0 and pow <= NUM_PES) : (pow *= 2) {
+      i += 1;
+    }
+  } else {
+    while (pow <= NUM_PES) : (pow *= 2) {
+      if (rev_id & pow != 0) {
+        i += 1;
+      }
+    }
+  }
+  return i;
+}
+
+fn send_ctrl(pe_id: u32, rev_id: u32) bool {
+  var i: u32 = 0;
+  var pow: u32 = 1;
+
+  if (pe_id == 0) return false;
+  
+  while (rev_id & pow != 0 and pow <= NUM_PES) : (pow *= 2) {
+    i += 1;
+  }
+
+  pow *= 2;
+
+  if (pow <= NUM_PES and rev_id & pow == 0) return true;
+
+  return false;
+}
+
+
+
+const switches_sender = .{
+  .pos1 = .{ .rx = POS_DIR },
+  .current_switch_pos = 0,
+  .ring_mode = false
+};
+
+const switches_receiver = .{
+  .pos1 = .{ .tx = NEG_DIR },
+  .current_switch_pos = 0,
+  .ring_mode = false
+};
+
+
+fn configure_network() void {
+  @block(in_color);
+  @bind_task(execution, out_color);
+  @set_local_color_config(in_color, .{.routes = .{.rx = .{POS_DIR}, .tx = if (comptime recv_count(pe_id, rev_id) == 0) .{NEG_DIR} else .{RAMP}}, .switches = switches_receiver});
+
+  @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}, .switches = switches_sender});
+}
+
+fn fabin_to_mem(m: mem1d_dsd, f: fabin_dsd, activate: color) void {
+  @mov32(m, f, .{ .async = true, .activate = activate });
+}
+
+// Same as `fabin_to_mem`
+fn mem_to_fabout(f: fabout_dsd, m: mem1d_dsd, activate: color) void {
+  @mov32(f, m, .{ .async = true, .activate = activate });
+}
+
+// Same as `fabin_to_mem`
+fn fadds(dst: anytype, src0: anytype, src1: anytype, activate: color) void {
+  @fadds(dst, src0, src1, .{ .async = true, .activate = activate });
+}
+
+// Same as `fabin_to_mem`
+fn mem_to_fabout_no_activate(f: fabout_dsd, m: mem1d_dsd) void {
+  @mov32(f, m, .{ .async = true });
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate_input: color) void {
+  activate = activate_input;
+  fabin = @set_dsd_length(fabin, count);
+  fabout = @set_dsd_length(fabout, count);
+  mem = @set_dsd_length(mem, count);
+  mem = @set_dsd_base_addr(mem, buf);
+  rcvd_cnt = 1;
+  snd_visited = false;
+
+  @activate(out_color);
+}
+
+task execution() void {
+  if (rcvd_cnt < comptime recv_count(pe_id, rev_id)) {
+    rcvd_cnt += 1;
+    fadds(mem, mem, fabin, out_color);
+    return;
+  }
+
+  if (!snd_visited) {
+    snd_visited = true;
+    if (comptime recv_count(pe_id, rev_id) > 0 and pe_id > 0) {
+      fadds(fabout, mem, fabin, out_color);
+    } else if (comptime recv_count(pe_id, rev_id) == 0) {
+      mem_to_fabout(fabout, mem, out_color);
+    } else {
+      fadds(mem, mem, fabin, activate);
+    }
+    return;
+  }
+
+  if (is_ctrl) {
+    @mov32(ctrl, ctrl_mem, .{.async = true, .activate = activate});
+  }
+
+  @activate(activate);
+}

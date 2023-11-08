@@ -1,0 +1,63 @@
+param color_1: color;
+param color_2: color;
+
+param pe_id: u32;
+
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param NUM_PES: u32;
+
+const in_color = comptime get_in_color();
+const out_color = comptime get_out_color();
+
+var invalid_f32 = @zeros([1]f32);
+
+var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = out_color});
+var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = in_color});
+var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
+
+
+fn get_in_color() color {
+  if (pe_id % 2 == 0) {
+    return color_1;
+  }
+
+  return color_2;
+}
+
+fn get_out_color() color {
+  if (pe_id % 2 == 0) {
+    return color_2;
+  }
+
+  return color_1;
+}
+
+fn configure_network() void {
+  @block(in_color);
+  @set_local_color_config(in_color, .{.routes = .{.rx = .{POS_DIR}, .tx = .{RAMP}}});
+  @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}});
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate: color) void {
+
+  fabin = @set_dsd_length(fabin, count);
+  fabout = @set_dsd_length(fabout, count);
+  mem = @set_dsd_length(mem, count);
+
+  mem = @set_dsd_base_addr(mem, buf);
+
+  switch (pe_id) {
+    0 => {
+      @fadds(mem, mem, fabin);
+    },
+    (NUM_PES - 1) => {
+      @fmovs(fabout, mem);
+    },
+    else => {
+      @fadds(fabout, mem, fabin);
+    }
+  }
+
+  @activate(activate);
+}

@@ -1,0 +1,30 @@
+param color_1: color;
+param color_2: color;
+param algo: u32;
+param pe_id: u32;
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param NUM_PES: u32;
+param step: u32;
+
+const chain = @import_module("modules/chain.csl", .{.color_1 = color_1, .color_2 = color_2, .pe_id = pe_id, .POS_DIR = POS_DIR, .NEG_DIR = NEG_DIR, .NUM_PES = NUM_PES});
+const two_phase = @import_module("modules/two_phase_working.csl", .{.color_1 = color_1, .color_2 = color_2, .pe_id = pe_id, .POS_DIR = POS_DIR, .NEG_DIR = NEG_DIR, .NUM_PES = NUM_PES, .step = step});
+const tree = @import_module("modules/tree.csl", .{.color_1 = color_1, .color_2 = color_2, .pe_id = pe_id, .POS_DIR = POS_DIR, .NEG_DIR = NEG_DIR, .NUM_PES = NUM_PES});
+
+// 0: chain, 1: two phase, 2: tree
+fn configure_network() void{
+  switch (algo) {
+    0 => chain.configure_network(),
+    1 => two_phase.configure_network(),
+    else => tree.configure_network()
+  }
+  
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate: color) void {
+  switch (algo) {
+    0 => chain.transfer_data(buf, count, activate),
+    1 => two_phase.transfer_data(buf, count, activate),
+    else => tree.transfer_data(buf, count, activate)
+  }
+}

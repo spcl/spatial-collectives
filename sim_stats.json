@@ -1,0 +1,16 @@
+{
+    "active_tile_cycles_per_second": 326083,
+    "active_tile_cycles_per_second_per_thread": 65217,
+    "cycle_count": 781,
+    "cycles_per_second": 209,
+    "fabric_x": 519,
+    "fabric_y": 3,
+    "hwtile_count": 1557,
+    "init_time": 2.848694845,
+    "othertile_count": 0,
+    "sim_stop_cause": "Stopped due to idleness",
+    "sim_time": 3.729167418,
+    "sunset_count": 50,
+    "tile_cycles_per_second": 544728,
+    "tile_cycles_per_second_per_thread": 108946
+}

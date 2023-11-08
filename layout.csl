@@ -1,0 +1,12 @@
+param Pw: u16;
+param step: u16;
+param Nx: u16;
+
+layout {
+  @set_rectangle(Pw, 1);
+
+  for (@range(u16, Pw)) |Px| {
+    @set_tile_code(Px, 0, "code_broadcast.csl", .{ .pe_id = Px,
+      .step = step, .Nx = Nx, .Pw = Pw });
+  }
+}

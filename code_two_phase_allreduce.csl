@@ -1,0 +1,42 @@
+param pe_id: u16;
+param step: u16;
+param Nx: u16;
+param Pw: u16;
+
+const chain_right = @import_module("modules/two_phase_sync.csl", .{.color_1 = @get_color(6), .color_2 = @get_color(7), .pe_id = Pw - pe_id - 1, .POS_DIR = WEST, .NEG_DIR = EAST, .NUM_PES = Pw, .step=32});
+
+const broadcast_left = @import_module("modules/broadcast_sync.csl", .{.color_1 = @get_color(8), .pe_id = Pw - pe_id - 1, .POS_DIR = WEST, .NEG_DIR = EAST, .NUM_PES = Pw});
+
+const rect_height = @get_rectangle().height;
+// const rect_width = @get_rectangle().width;
+
+const execution_color = @get_color(16);
+
+const times = @import_module("<debug>", .{.buffer_size = 100});
+
+var data = @constants([Nx]f32, 1.0);
+// Ptr to data will be exported as symbol to host
+var data_ptr: [*]f32 = &data;
+
+var c: u16 = 0;
+
+task execution() void {
+
+  if (c == 0){
+    c += 1;
+    times.trace_timestamp();
+    chain_right.transfer_data(data_ptr, Nx, execution_color);
+  } else if (c == 1){
+    c += 1;
+    broadcast_left.transfer_data(data_ptr, Nx, execution_color);
+  } else {
+    times.trace_timestamp();
+  }
+}
+
+comptime {
+  @bind_task(execution, execution_color);
+  @activate(execution_color);
+  broadcast_left.configure_network();
+  chain_right.configure_network();
+}

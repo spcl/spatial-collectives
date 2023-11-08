@@ -1,0 +1,24 @@
+// Opcodes for potentially updating switches
+const opcode_nop = 0;
+const opcode_switch_advance = 1;
+const opcode_switch_reset = 2;
+const opcode_teardown = 3;
+
+// Helper function to construct the payload of the control wavelet.
+// args:
+//    ceFilter: a filter bit to disable transmission from the destination
+//              router to the destination CE,
+//    opcode: switching opcode (see comment above), and
+//    data: 16-bit wavelet data
+fn ctrl(ce_filter: bool, opcode: i16, data: u16) u32 {
+  const six = @as(u32, 6);
+  const eight = @as(u32, 8);
+  const sixteen = @as(u32, 16);
+
+  const hi_word = @as(u32, 1) |
+                  @as(u32, opcode) << six |
+                  @as(u32, ce_filter) << eight;
+
+  const lo_word = @as(u32, data);
+  return hi_word << sixteen | lo_word;
+}

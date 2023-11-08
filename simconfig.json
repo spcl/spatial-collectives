@@ -1,0 +1,54 @@
+{
+  "activeOnly": false,
+  "checkReplicas": false,
+  "cosim": {
+    "input": {
+      "ctfTrace": {
+        "dirname": "",
+        "numCtfFiles": 0
+      },
+      "jsonTrace": {
+        "filename": ""
+      },
+      "mode": ""
+    },
+    "mode": ""
+  },
+  "debug": [],
+  "delayedQueueService": 0,
+  "dieOnTerm": false,
+  "logger": {
+    "compress": false,
+    "logfile": "",
+    "minloglevel": "INFO"
+  },
+  "maxStartupDelay": 0,
+  "multinode": {
+    "enabled": false
+  },
+  "orderTraces": false,
+  "outdir": ".",
+  "planmeta": "",
+  "randSeed": 1,
+  "savepointInterval": 0,
+  "simtile": "hwtile",
+  "stalls": [],
+  "sunsetCount": 50,
+  "threading": {
+    "clusterThreads": false,
+    "numThreads": 5,
+    "pinBias": 0,
+    "pinThreads": false
+  },
+  "trace": [],
+  "traceFormat": {
+    "ctfTrace": {
+      "dirname": "",
+      "numCtfFiles": 0
+    },
+    "jsonTrace": {
+      "filename": ""
+    },
+    "mode": ""
+  }
+}
