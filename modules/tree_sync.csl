@@ -18,7 +18,7 @@ const is_ctrl = comptime send_ctrl(pe_id, rev_id);
 var rcvd_cnt: u32 = 0;
 
 var invalid_f32 = @zeros([1]f32);
-var activate: color;
+var activate: local_task_id;
 var snd_visited: bool = false;
 var ctrl_mem_loc = @constants([1]u32, comptime ctrl_module.ctrl(true, ctrl_module.opcode_switch_advance, 0x00));
 
@@ -124,7 +124,7 @@ fn configure_network() void {
   @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}, .switches = switches_sender});
 }
 
-fn transfer_data(buf: [*]f32, count: u16, activate_input: color) void {
+fn transfer_data(buf: [*]f32, count: u16, activate_input: local_task_id) void {
   activate = activate_input;
   fabin = @set_dsd_length(fabin, count);
   fabout = @set_dsd_length(fabout, count);

@@ -1,0 +1,103 @@
+param memcpy_params: comptime_struct;
+param pe_id: u16;
+param Nx: u16;
+param Pw: u16;
+param algo: u16;
+
+const sys_mod = @import_module("<memcpy/memcpy>", memcpy_params);
+const exit_task_id: local_task_id = @get_local_task_id(18);
+const bcast_right_id: local_task_id = @get_local_task_id(19);
+const finish_sync_id: local_task_id = @get_local_task_id(20);
+var i: u16 = 0;
+
+
+const broadcast_right = @import_module("modules/broadcast_sync.csl", .{.color_1 = @get_color(9), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw});
+
+const chain_reduce_left = @import_module("modules/reduce.csl", .{.color_1 = @get_color(10), .color_2 = @get_color(11), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = 32, .algo = 0});
+
+const reduce = @import_module("modules/reduce.csl", .{.color_1 = @get_color(12), .color_2 = @get_color(13), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = 32, .algo = algo});
+
+const timestamp = @import_module("<time>");
+
+// tsc_size_words = 3
+// starting time of H2D/D2H
+var tscStartBuffer = @zeros([timestamp.tsc_size_words]u16);
+// ending time of H2D/D2H
+var tscEndBuffer = @zeros([timestamp.tsc_size_words]u16);
+var tscRefBuffer = @zeros([timestamp.tsc_size_words]u16);
+
+var time_buf_u16 = @zeros([timestamp.tsc_size_words*2]u16);
+var time_ref_u16 = @zeros([timestamp.tsc_size_words]u16);
+
+var ptr_time_buf_u16: [*]u16 = &time_buf_u16;
+var ptr_time_ref: [*]u16 = &time_ref_u16;
+
+var x = @constants([Nx]f32, 1.0);
+var x_ptr: [*]f32 = &x;
+
+var dummy = @zeros([1]f32);
+var xd = @zeros([2*(Pw - pe_id)]f32);
+const dummy_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{2*(Pw - pe_id)} -> xd[i]});
+
+fn f_sync(n: i16) void {
+  timestamp.enable_tsc();
+  // Perform chain reduce to synchronize all PEs
+  chain_reduce_left.transfer_data(&dummy, 1, bcast_right_id);
+}
+
+task bcast_right() void {
+  broadcast_right.transfer_data(&dummy, 1, finish_sync_id);
+}
+
+task finish_sync() void {
+  timestamp.get_timestamp(&tscRefBuffer);
+  delay();
+  compute();
+}
+
+// Function to delay the start of compute by some number of cycles in order for all PEs to start at a relatively similar time
+fn delay() void {
+  @fmovs(dummy_mem_dsd, 1.0);
+}
+
+fn compute() void {
+  timestamp.get_timestamp(&tscStartBuffer);
+  reduce.transfer_data(x_ptr, Nx, exit_task_id);
+}
+
+task exit_task() void {
+  timestamp.get_timestamp(&tscEndBuffer);
+  sys_mod.unblock_cmd_stream();
+}
+
+fn f_memcpy_timestamps() void {
+
+  time_buf_u16[0] = tscStartBuffer[0];
+  time_buf_u16[1] = tscStartBuffer[1];
+  time_buf_u16[2] = tscStartBuffer[2];
+
+  time_buf_u16[3] = tscEndBuffer[0];
+  time_buf_u16[4] = tscEndBuffer[1];
+  time_buf_u16[5] = tscEndBuffer[2];
+
+  sys_mod.unblock_cmd_stream();
+}
+
+comptime {
+  @bind_local_task(exit_task, exit_task_id);
+  @bind_local_task(bcast_right, bcast_right_id);
+  @bind_local_task(finish_sync, finish_sync_id);
+
+  broadcast_right.configure_network();
+  chain_reduce_left.configure_network();
+  reduce.configure_network();
+  @rpc(@get_data_task_id(sys_mod.LAUNCH));
+
+  @export_symbol(x_ptr, "x");
+  @export_symbol(ptr_time_buf_u16, "time_buf_u16");
+  @export_symbol(ptr_time_ref, "time_ref");
+
+  @export_symbol(compute);
+  @export_symbol(f_sync);
+  @export_symbol(f_memcpy_timestamps);
+}

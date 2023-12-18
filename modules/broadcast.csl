@@ -42,17 +42,17 @@ fn configure_network() void {
   }
 }
 
-fn fabin_to_mem(m: mem1d_dsd, f: fabin_dsd, activate: color) void {
+fn fabin_to_mem(m: mem1d_dsd, f: fabin_dsd, activate: local_task_id) void {
   @mov32(m, f, .{ .async = true, .activate = activate });
 }
 
 // Same as `fabin_to_mem`
-fn mem_to_fabout(f: fabout_dsd, m: mem1d_dsd, activate: color) void {
+fn mem_to_fabout(f: fabout_dsd, m: mem1d_dsd, activate: local_task_id) void {
   @mov32(f, m, .{ .async = true, .activate = activate });
 }
 
 // Same as `fabin_to_mem`
-fn fadds(dst: anytype, src0: anytype, src1: anytype, activate: color) void {
+fn fadds(dst: anytype, src0: anytype, src1: anytype, activate: local_task_id) void {
   @fadds(dst, src0, src1, .{ .async = true, .activate = activate });
 }
 
@@ -61,7 +61,7 @@ fn mem_to_fabout_no_activate(f: fabout_dsd, m: mem1d_dsd) void {
   @mov32(f, m, .{ .async = true });
 }
 
-fn transfer_data(buf: [*]f32, count: u16, activate: color) void {
+fn transfer_data(buf: [*]f32, count: u16, activate: local_task_id) void {
 
   fabin = @set_dsd_length(fabin, count);
   fabout = @set_dsd_length(fabout, count);

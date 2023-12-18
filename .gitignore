@@ -1,2 +1,4 @@
 out/
 simfab_traces/
+results.txt
+wio_flow.json

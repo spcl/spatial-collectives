@@ -16,13 +16,21 @@
   },
   "debug": [],
   "delayedQueueService": 0,
+  "dieModel": {
+    "latency": 0,
+    "nx": 0,
+    "ny": 0
+  },
   "dieOnTerm": false,
   "logger": {
     "compress": false,
     "logfile": "",
     "minloglevel": "INFO"
   },
+  "lvdsRecvBandwidthCycles": 0,
+  "lvdsSendBandwidthCycles": 0,
   "maxStartupDelay": 0,
+  "memwatch": [],
   "multinode": {
     "enabled": false
   },
@@ -35,6 +43,7 @@
   "stalls": [],
   "sunsetCount": 50,
   "threading": {
+    "batchSize": 16,
     "clusterThreads": false,
     "numThreads": 5,
     "pinBias": 0,

@@ -25,7 +25,7 @@ fn configure_network() void {
   }
 }
 
-fn transfer_data(buf: [*]f32, count: u16, activate: color) void {
+fn transfer_data(buf: [*]f32, count: u16, activate: local_task_id) void {
 
   fabin = @set_dsd_length(fabin, count);
   fabout = @set_dsd_length(fabout, count);

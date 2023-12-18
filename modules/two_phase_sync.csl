@@ -14,7 +14,7 @@ const in_color = comptime get_in_color(pe_id, rev_id);
 const out_color = comptime get_out_color(pe_id, rev_id);
 
 var invalid_f32 = @zeros([1]f32);
-var activate: color;
+var activate: local_task_id;
 var ctrl_mem_loc = @constants([1]u32, comptime ctrl_module.ctrl(true, ctrl_module.opcode_switch_advance, 0x00));
 
 var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = out_color, .advance_switch = if (comptime advance_self_only(pe_id, rev_id)) true else false});
@@ -115,7 +115,7 @@ fn configure_network() void {
   @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}, .switches = switches_sender});
 }
 
-fn transfer_data(buf: [*]f32, count: u16, activate_input: color) void {
+fn transfer_data(buf: [*]f32, count: u16, activate_input: local_task_id) void {
   activate = activate_input;
   fabin = @set_dsd_length(fabin, count);
   fabout = @set_dsd_length(fabout, count);

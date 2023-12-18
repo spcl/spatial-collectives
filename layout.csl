@@ -1,12 +1,28 @@
 param Pw: u16;
 param step: u16;
 param Nx: u16;
+param Algo: u16;
+
+const LAUNCH: color = @get_color(8); // Color used by memcpy for kernel launch
+
+const memcpy = @import_module("<memcpy/get_params>", .{
+  .width = Pw,
+  .height = 1,
+  .LAUNCH = LAUNCH
+});
 
 layout {
   @set_rectangle(Pw, 1);
 
   for (@range(u16, Pw)) |Px| {
-    @set_tile_code(Px, 0, "code_broadcast.csl", .{ .pe_id = Px,
-      .step = step, .Nx = Nx, .Pw = Pw });
+    @set_tile_code(Px, 0, "code.csl", .{ .pe_id = Px, .Nx = Nx, .Pw = Pw, .algo = Algo, .memcpy_params = memcpy.get_params(Px)});
   }
+
+  @export_name("x", [*]f32, true);
+  @export_name("time_buf_u16", [*]u16, true);
+  @export_name("time_ref", [*]u16, true);
+
+  @export_name("compute", fn()void);
+  @export_name("f_memcpy_timestamps", fn()void);
+  @export_name("f_sync", fn(i16)void);
 }
