@@ -16,14 +16,13 @@ layout {
   @set_rectangle(Pw, 1);
 
   for (@range(u16, Pw)) |Px| {
-    @set_tile_code(Px, 0, "code.csl", .{ .pe_id = Px, .Nx = Nx, .Pw = Pw, .algo = Algo, .memcpy_params = memcpy.get_params(Px), .is_allred=is_allred, .step = step});
+    @set_tile_code(Px, 0, "code_broadcast.csl", .{ .pe_id = Px, .Nx = Nx, .Pw = Pw, .algo = Algo, .memcpy_params = memcpy.get_params(Px), .is_allred=is_allred, .step = step});
   }
 
   @export_name("x", [*]f32, true);
   @export_name("time_buf_u16", [*]u16, true);
   @export_name("time_ref", [*]u16, true);
 
-  @export_name("compute", fn()void);
   @export_name("f_memcpy_timestamps", fn()void);
   @export_name("f_sync", fn(i16)void);
 }

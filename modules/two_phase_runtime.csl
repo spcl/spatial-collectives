@@ -1,0 +1,211 @@
+const ctrl_module = @import_module("modules/ctrl_module.csl");
+const consts = @import_module("modules/constants.csl");
+const color_config = @import_module("modules/wse2_color_config_with_params.csl", .{.POS_DIR = POS_DIR, .NEG_DIR =NEG_DIR});
+const layout_module = @import_module("<layout>");
+param color_1: color;
+param color_2: color;
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param NUM_PES: u32;
+param timestamp: imported_module;
+param rev: bool;
+param is_x: bool;
+param step: u32;
+
+const color_1_addr: u16 = color_config.get_color_config_addr(color_1);
+const color_2_addr: u16 = color_config.get_color_config_addr(color_2);
+const switch_1_addr: u16 = consts.SWITCHES_BASE + @get_int(color_1);
+const switch_2_addr: u16 = consts.SWITCHES_BASE + @get_int(color_2);
+
+const switch_1_ptr: *u16 = @bitcast(*u16, 2 * switch_1_addr);
+const switch_2_ptr: *u16 = @bitcast(*u16, 2 * switch_2_addr);
+
+var pe_id: u32 = 0;
+var rev_id: u32 = 0;
+var in_color: color = color_1;
+var out_color: color = color_2;
+var is_ctrl: bool = false;
+var rcvd_cnt: u32 = 0;
+var rcv_cnt: u32 = 0;
+var activate: local_task_id;
+var snd_visited: bool = false;
+var ctrl_mem_loc = @constants([1]u32, comptime ctrl_module.ctrl(true, ctrl_module.opcode_switch_advance, 0x00));
+
+var invalid_f32 = @zeros([1]f32);
+var fabout_1 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1});
+var fabout_1_advance = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1, .advance_switch = true});
+var fabout_2 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_2});
+var fabout_2_advance = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_2, .advance_switch = true});
+var fabin_1 = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_1});
+var fabin_2 = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_2});
+var ctrl_1 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1, .control = true});
+var ctrl_2 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_2, .control = true});
+var fabin: fabin_dsd;
+var fabout: fabout_dsd;
+var ctrl: fabout_dsd;
+var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
+var ctrl_mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> ctrl_mem_loc[i] });
+
+const dsr_mem = @get_dsr(dsr_src0, 0);
+const dsr_mem_src1 = @get_dsr(dsr_src1, 1);
+const dsr_fabout = @get_dsr(dsr_dest, 0);
+const dsr_fabin = @get_dsr(dsr_src1, 0);
+const dsr_ctrl = @get_dsr(dsr_dest, 1);
+const dsr_mem_ctrl = @get_dsr(dsr_src1, 2);
+
+fn get_rev_id(pe_id: u32) u32{
+  return NUM_PES - pe_id - 1;
+}
+
+fn get_in_color(pe_id: u32, rev_id: u32) color{
+  var temp_rev: u32 = rev_id;
+  if (pe_id < NUM_PES % step) {
+    temp_rev += step - (NUM_PES % step);
+  }
+  if (((temp_rev) % 2 == 1 and (temp_rev) % (2*step) < step) or (temp_rev % (2*step) >= step and temp_rev % 2 == step % 2)) {
+    return color_1;
+  }
+
+  return color_2;
+}
+
+fn get_out_color(pe_id: u32, rev_id: u32) color{
+  var temp_rev: u32 = rev_id;
+  if (pe_id < NUM_PES % step) {
+    temp_rev += step - (NUM_PES % step);
+  }
+  if (((temp_rev) % 2 == 1 and (temp_rev) % (2*step) < step) or (temp_rev % (2*step) >= step and temp_rev % 2 == step % 2)) {
+    return color_2;
+  }
+
+  return color_1;
+}
+
+fn recv_count(pe_id: u32, rev_id: u32) u32 {
+  if (pe_id == 0) {
+    var total: u32 = 0;
+    total += if (rev_id % step != 0) 1 else 0;
+    total += if (NUM_PES != 0) 1 else 0;
+    return total;
+  }
+
+  if (rev_id % step == 0) {
+    return 0;
+  }
+  if (rev_id % step != step - 1 or rev_id == step - 1) {
+    return 1;
+  }
+  return 2;
+}
+fn propagate_count(pe_id: u32, rev_id: u32) u32 {
+  if (pe_id == 0 or rev_id % step == step - 1 or rev_id < step) return 0;
+  return 1;
+}
+fn send_ctrl(pe_id: u32, rev_id: u32) bool {
+  if (propagate_count(pe_id, rev_id) == 0) return false;
+
+  if (propagate_count(pe_id - 1, rev_id + 1) == 0) return false;
+
+  return true;
+}
+
+fn setup() void {
+  var x = @as(u32, if (is_x) layout_module.get_x_coord() else layout_module.get_y_coord());
+  pe_id = if (rev) NUM_PES - x - 1 else x;
+  rev_id = NUM_PES - pe_id - 1;
+  in_color = get_in_color(pe_id, rev_id);
+  out_color = get_out_color(pe_id, rev_id);
+  is_ctrl = send_ctrl(pe_id, rev_id);
+  rcv_cnt = recv_count(pe_id, rev_id);
+  configure_switch_out();
+  configure_switch_in();
+  configure_in();
+  configure_out();
+  if (is_ctrl) {
+    fabout = if (color_1 == out_color) fabout_1 else fabout_2;
+  } else {
+    fabout = if (color_1 == out_color) fabout_1_advance else fabout_2_advance;
+  }
+  fabin = if (color_1 == in_color) fabin_1 else fabin_2;
+  ctrl = if (color_1 == out_color) ctrl_1 else ctrl_2;
+}
+
+fn configure_in() void {
+  var r_state : u16 = @bitcast(*u16, if (color_1 == in_color) color_1_addr else color_2_addr).*;
+
+  // reset pos0 input/ output to nothing:
+  r_state = r_state & color_config.MASK_INPUT_OUTPUT_POS0;
+  
+  r_state = r_state | color_config.INPUT_POS | (if (recv_count(pe_id, rev_id) == 0) color_config.OUTPUT_NEG else color_config.OUTPUT_RAMP);
+  @block(in_color);
+  @bitcast(*u16, if (color_1 == in_color) color_1_addr else color_2_addr).* = r_state;
+}
+
+fn configure_switch_in() void {
+  var switch_mask: u16 = comptime consts.switch_pos1(NEG_DIR, 0, 0);
+
+  (if (in_color == color_1) switch_1_ptr else switch_2_ptr).* = switch_mask;
+}
+
+fn configure_out() void {
+  var r_state : u16 = @bitcast(*u16, if (color_1 == out_color) color_1_addr else color_2_addr).*;
+
+  // reset pos0 input/ output to nothing:
+  r_state = r_state & color_config.MASK_INPUT_OUTPUT_POS0;
+  
+  r_state = r_state | color_config.INPUT_RAMP | color_config.OUTPUT_NEG;
+
+  @bitcast(*u16, if (color_1 == out_color) color_1_addr else color_2_addr).* = r_state;
+}
+
+fn configure_switch_out() void {
+  var switch_mask: u16 = comptime consts.switch_pos1(POS_DIR, 1, 0);
+
+  (if (out_color == color_1) switch_1_ptr else switch_2_ptr).* = switch_mask;
+}
+const switches_sender = .{
+  .pos1 = .{ .rx = POS_DIR },
+  .current_switch_pos = 0,
+  .ring_mode = false
+};
+fn configure_network() void {
+
+  // @block(in_color);
+  @set_local_color_config(color_1, .{.routes = .{.rx = .{}, .tx = .{}}, .switches = switches_sender});
+  @set_local_color_config(color_2, .{.routes = .{.rx = .{}, .tx = .{}}, .switches = switches_sender});
+  // @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}});
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate_input: local_task_id, tsc_start_ptr: *[3]u16) void {
+  activate = activate_input;
+  fabin = @set_dsd_length(fabin, count);
+  fabout = @set_dsd_length(fabout, count);
+  mem = @set_dsd_length(mem, count);
+  mem = @set_dsd_base_addr(mem, buf);
+  rcvd_cnt = 1;
+  @load_to_dsr(dsr_mem, mem);
+  @load_to_dsr(dsr_mem_src1, mem);
+  @load_to_dsr(dsr_fabin, fabin);
+  @load_to_dsr(dsr_fabout, fabout);
+  @load_to_dsr(dsr_ctrl, ctrl);
+  @load_to_dsr(dsr_mem_ctrl, ctrl_mem);
+  timestamp.get_timestamp(tsc_start_ptr);
+  while (rcvd_cnt < rcv_cnt) {
+    rcvd_cnt += 1;
+    @fadds(dsr_mem, dsr_mem, dsr_fabin);
+  }
+
+  if (rcv_cnt > 0 and pe_id > 0) {
+    @fadds(dsr_fabout, dsr_mem, dsr_fabin);
+  } else if (rcv_cnt == 0) {
+    @mov32(dsr_fabout, dsr_mem_src1);
+  } else {
+    @fadds(dsr_mem, dsr_mem, dsr_fabin);
+  }
+
+  if (is_ctrl) {
+    @mov32(dsr_ctrl, dsr_mem_ctrl);
+  }
+
+  @activate(activate);
+}

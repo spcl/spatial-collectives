@@ -1,6 +1,7 @@
 param Pw: u16;
+param Ph: u16;
 param step: u16;
-param Nx: u16;
+param Nx_start: u16;
 param Algo: u16;
 param is_allred: u16;
 
@@ -16,7 +17,7 @@ layout {
   @set_rectangle(Pw, 1);
 
   for (@range(u16, Pw)) |Px| {
-    @set_tile_code(Px, 0, "code.csl", .{ .pe_id = Px, .Nx = Nx, .Pw = Pw, .algo = Algo, .memcpy_params = memcpy.get_params(Px), .is_allred=is_allred, .step = step});
+    @set_tile_code(Px, 0, "code_1d_test_inc.csl", .{ .pe_id = Px, .Nx_start = Nx_start, .Pw = Pw, .algo = Algo, .memcpy_params = memcpy.get_params(Px), .is_allred=is_allred, .step = step});
   }
 
   @export_name("x", [*]f32, true);

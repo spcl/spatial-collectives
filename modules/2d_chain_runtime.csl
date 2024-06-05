@@ -1,0 +1,135 @@
+const color_config = @import_module("modules/wse2_color_config.csl");
+const layout_module = @import_module("<layout>");
+param color_1: color;
+param color_2: color;
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param timestamp: imported_module;
+param M: u32;
+param N: u32;
+const NUM_PES = M * N;
+
+const color_1_addr: u16 = color_config.get_color_config_addr(color_1);
+const color_2_addr: u16 = color_config.get_color_config_addr(color_2);
+
+var id_x: u32 = 0;
+var id_y: u32 = 0;
+var pe_id: u32 = 0;
+var in_color: color = color_1;
+var out_color: color = color_2;
+
+var invalid_f32 = @zeros([1]f32);
+var fabout_1 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1});
+var fabout_2 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_2});
+var fabin_1 = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_1});
+var fabin_2 = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_2});
+var fabin: fabin_dsd;
+var fabout: fabout_dsd;
+var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
+
+const dsr_mem_src0 = @get_dsr(dsr_src0, 0);
+const dsr_mem_src1 = @get_dsr(dsr_src1, 1);
+const dsr_fabout = @get_dsr(dsr_dest, 0);
+const dsr_fabin = @get_dsr(dsr_src1, 0);
+
+fn get_in_color(pe_id: u32) color {
+  if (pe_id % 2 == 0) {
+    return color_1;
+  }
+
+  return color_2;
+}
+
+fn get_out_color(pe_id: u32) color {
+  if (pe_id % 2 == 0) {
+    return color_2;
+  }
+
+  return color_1;
+}
+
+fn setup() void {
+  id_x = @as(u32, layout_module.get_x_coord());
+  id_y = @as(u32, layout_module.get_y_coord());
+  pe_id = id_y * N + (if (id_y % 2 == 0) id_x else N - id_x - 1);
+  in_color = get_in_color(pe_id);
+  out_color = get_out_color(pe_id);
+  configure_in();
+  configure_out();
+  fabout = if (color_1 == out_color) fabout_1 else fabout_2;
+  fabin = if (color_1 == in_color) fabin_1 else fabin_2;
+}
+
+fn get_rx() direction {
+  if (id_y % 2 == 1) {
+    if (id_x == 0) return SOUTH;
+    return WEST;
+  } else {
+    if (id_x + 1 == N) return SOUTH;
+    return EAST;
+  }
+}
+
+fn get_tx() direction {
+  if (id_y % 2 == 1) {
+    if (id_x + 1 == N) return NORTH;
+    return EAST;
+  } else {
+    if (id_x == 0) return NORTH;
+    return WEST;
+  }
+}
+
+fn configure_in() void {
+  var r_state : u16 = @bitcast(*u16, if (color_1 == in_color) color_1_addr else color_2_addr).*;
+
+  // reset pos0 input/ output to nothing:
+  r_state = r_state & color_config.MASK_INPUT_OUTPUT_POS0;
+
+  var rx = color_config.INPUT_WEST;
+  
+  r_state = r_state | color_config.get_input(get_rx()) | color_config.OUTPUT_RAMP;
+  @block(in_color);
+  @bitcast(*u16, if (color_1 == in_color) color_1_addr else color_2_addr).* = r_state;
+}
+
+fn configure_out() void {
+  var r_state : u16 = @bitcast(*u16, if (color_1 == out_color) color_1_addr else color_2_addr).*;
+
+  // reset pos0 input/ output to nothing:
+  r_state = r_state & color_config.MASK_INPUT_OUTPUT_POS0;
+  
+  r_state = r_state | color_config.INPUT_RAMP | color_config.get_output(get_tx());
+
+  @bitcast(*u16, if (color_1 == out_color) color_1_addr else color_2_addr).* = r_state;
+}
+
+fn configure_network() void {
+
+  // @block(in_color);
+  // @set_local_color_config(in_color, .{.routes = .{.rx = .{POS_DIR}, .tx = .{RAMP}}});
+  // @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}});
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate: local_task_id, tsc_start_ptr: *[3]u16) void {
+  fabin = @set_dsd_length(fabin, count);
+  fabout = @set_dsd_length(fabout, count);
+  mem = @set_dsd_length(mem, count);
+  mem = @set_dsd_base_addr(mem, buf);
+
+  @load_to_dsr(dsr_fabin, fabin);
+  @load_to_dsr(dsr_fabout, fabout);
+  @load_to_dsr(dsr_mem_src1, mem);
+  @load_to_dsr(dsr_mem_src0, mem);
+
+  timestamp.get_timestamp(tsc_start_ptr);
+
+  if (pe_id == 0) {
+    @fadds(dsr_mem_src0, dsr_mem_src0, dsr_fabin);
+  } else if (pe_id == NUM_PES - 1) {
+      @fmovs(dsr_fabout, dsr_mem_src1);
+  } else {
+    @fadds(dsr_fabout, dsr_mem_src0, dsr_fabin);
+  }
+  @activate(activate);
+}

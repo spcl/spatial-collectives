@@ -1,0 +1,128 @@
+param color_1: color;
+param color_2: color;
+param pe_id: u32;
+
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param NUM_PES: u32;
+param timestamp: imported_module;
+
+var invalid_f32 = @zeros([1]f32);
+
+var fabout_pos = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1});
+var fabout_neg = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_2});
+var fabin_pos = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_1});
+var fabin_neg = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_2});
+var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
+
+const dsr_mem_send = @get_dsr(dsr_src1, 1);
+const dsr_mem_rcv = @get_dsr(dsr_dest, 1);
+const dsr_fabout_pos = @get_dsr(dsr_dest, 0);
+const dsr_fabout_neg = @get_dsr(dsr_dest, 2);
+const dsr_fabin_pos = @get_dsr(dsr_src1, 0);
+const dsr_fabin_neg = @get_dsr(dsr_src1, 2);
+
+fn configure_network() void {
+  if (pe_id != 0) {
+    @block(color_1);
+  }
+
+  if (pe_id != NUM_PES - 1) {
+    @block(color_2);
+  }
+
+  if (pe_id == 0) {
+    @set_local_color_config(color_1, .{.routes = .{.rx = .{RAMP}, .tx = .{POS_DIR}}});
+  } else if (pe_id + 1 < NUM_PES) {
+    @set_local_color_config(color_1, .{.routes = .{.rx = .{NEG_DIR}, .tx = .{RAMP, POS_DIR}}});
+  } else {
+    @set_local_color_config(color_1, .{.routes = .{.rx = .{NEG_DIR}, .tx = .{RAMP}}});
+  }
+
+  if (pe_id == NUM_PES - 1) {
+    @set_local_color_config(color_2, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}});
+  } else if (pe_id > 0) {
+    @set_local_color_config(color_2, .{.routes = .{.rx = .{POS_DIR}, .tx = .{RAMP, NEG_DIR}}});
+  } else {
+    @set_local_color_config(color_2, .{.routes = .{.rx = .{POS_DIR}, .tx = .{RAMP}}});
+  }
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate: local_task_id, tsc_start_ptr: *[3]u16, tsc_end_ptr: *[3]u16) void {
+
+  fabin_pos = @set_dsd_length(fabin_pos, count);
+  fabin_neg = @set_dsd_length(fabin_neg, count);
+  fabout_pos = @set_dsd_length(fabout_pos, count);
+  fabout_neg = @set_dsd_length(fabout_neg, count);
+  mem = @set_dsd_length(mem, count);
+  mem = @set_dsd_base_addr(mem, buf);
+
+  @load_to_dsr(dsr_mem_rcv, mem);
+  @load_to_dsr(dsr_mem_send, mem);
+  @load_to_dsr(dsr_fabin_pos, fabin_pos);
+  @load_to_dsr(dsr_fabin_neg, fabin_neg);
+  @load_to_dsr(dsr_fabout_pos, fabout_pos);
+  @load_to_dsr(dsr_fabout_neg, fabout_neg);
+
+  switch (pe_id) {
+    0 => {
+      @fmovs(dsr_fabout_pos, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_fabout_pos, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_fabout_pos, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      timestamp.get_timestamp(tsc_start_ptr);
+      @fmovs(dsr_fabout_pos, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_fabout_pos, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_fabout_pos, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_fabout_pos, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_fabout_pos, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      timestamp.get_timestamp(tsc_end_ptr);
+    },
+    (NUM_PES - 1) => {
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_fabout_neg, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_fabout_neg, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_fabout_neg, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_fabout_neg, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_fabout_neg, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_fabout_neg, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_fabout_neg, dsr_mem_send);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_fabout_neg, dsr_mem_send);
+    },
+    else => {
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+      @fmovs(dsr_mem_rcv, dsr_fabin_pos);
+      @fmovs(dsr_mem_rcv, dsr_fabin_neg);
+    }
+  }
+
+  @activate(activate);
+}
+

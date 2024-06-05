@@ -1,0 +1,50 @@
+param color_1: color;
+param color_2: color;
+param algo: u32;
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param NUM_PES: u32;
+param step: u32;
+param timestamp: imported_module;
+param rev: bool;
+param is_x: bool;
+
+const chain = @import_module("modules/chain_runtime.csl", .{.color_1 = color_1, .color_2 = color_2, .POS_DIR = POS_DIR, .NEG_DIR = NEG_DIR, .NUM_PES = NUM_PES, .timestamp = timestamp, .rev = rev, .is_x = is_x});
+const two_phase = @import_module("modules/two_phase_runtime.csl", .{.color_1 = color_1, .color_2 = color_2, .POS_DIR = POS_DIR, .NEG_DIR = NEG_DIR, .NUM_PES = NUM_PES, .step = step, .timestamp = timestamp, .rev = rev, .is_x = is_x});
+const tree = @import_module("modules/tree_runtime.csl", .{.color_1 = color_1, .color_2 = color_2, .POS_DIR = POS_DIR, .NEG_DIR = NEG_DIR, .NUM_PES = NUM_PES, .timestamp = timestamp, .rev = rev, .is_x = is_x});
+
+// const star = @import_module("modules/star.csl", .{.color_1 = color_1, .pe_id = pe_id, .POS_DIR = POS_DIR, .NEG_DIR = NEG_DIR, .NUM_PES = NUM_PES, .timestamp = timestamp});
+
+// 0: chain, 1: two phase, 2: tree
+fn setup() void{
+  switch (algo) {
+    0 => chain.setup(),
+    1 => two_phase.setup(),
+    2 => tree.setup(),
+    else => void
+  }
+  
+}
+
+fn configure_network() void{
+  switch (algo) {
+    0 => chain.configure_network(),
+    1 => two_phase.configure_network(),
+    2 => tree.configure_network(),
+    else => void
+  }
+  
+}
+
+
+fn transfer_data(buf: [*]f32, count: u16, activate: local_task_id, tsc_start_ptr: *[3]u16) void {
+  switch (algo) {
+    0 => chain.transfer_data(buf, count, activate, tsc_start_ptr),
+    1 => two_phase.transfer_data(buf, count, activate, tsc_start_ptr),
+    2 => tree.transfer_data(buf, count, activate, tsc_start_ptr),
+    // 3 => {
+    //   if (count == 0) star.transfer_data(buf, count, activate, tsc_start_ptr) else star.transfer_data_scalar(buf, count, activate, tsc_start_ptr);
+    // },
+    else => void
+  }
+}

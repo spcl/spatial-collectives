@@ -12,12 +12,9 @@ const bcast_right_id: local_task_id = @get_local_task_id(19);
 const finish_sync_id: local_task_id = @get_local_task_id(20);
 const timestamp = @import_module("modules/time.csl");
 
-
-const broadcast_right = @import_module("modules/broadcast.csl", .{.color_1 = @get_color(9), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw});
-
 const chain_reduce_left = @import_module("modules/reduce.csl", .{.color_1 = @get_color(10), .color_2 = @get_color(11), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = 8, .algo = 0, .timestamp = timestamp});
 
-const reduce = @import_module("modules/reduce.csl", .{.color_1 = @get_color(12), .color_2 = @get_color(13), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = step, .algo = algo, .timestamp = timestamp});
+const two_way_bcast = @import_module("modules/two_way_broadcast.csl", .{.color_1 = @get_color(12), .color_2 = @get_color(13), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .timestamp = timestamp});
 
 
 // tsc_size_words = 3
@@ -38,11 +35,6 @@ var x_ptr: [*]f32 = &x;
 
 var dummy = @zeros([4096]f32);
 const dummy_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{4096} -> dummy[i]});
-var xd = @zeros([2*(Pw - pe_id)]f32);
-// best so far is: 1.629x
-const xd_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{@as(u16,1.629*@as(f32,(Pw - pe_id)))} -> xd[i]});
-
-var i: u16 = 0;
 
 fn f_sync(n: i16) void {
   timestamp.enable_tsc();
@@ -52,32 +44,15 @@ fn f_sync(n: i16) void {
 }
 
 task bcast_right() void {
-  broadcast_right.transfer_data(&dummy, 4096, finish_sync_id);
+  two_way_bcast.transfer_data(x_ptr, Nx, exit_task_id, &tscStartBuffer, &tscEndBuffer);
 }
 
 task finish_sync() void {
   timestamp.get_timestamp(&tscRefBuffer);
-  delay();
-  compute();
-}
-
-// Function to delay the start of compute by some number of cycles in order for all PEs to start at a relatively similar time
-fn delay() void {
-  @fmovs(xd_mem_dsd, 1.0);
-}
-
-fn compute() void {
-  reduce.transfer_data(x_ptr, Nx, exit_task_id, &tscStartBuffer);
 }
 
 task exit_task() void {
-  if (i == 0 and is_allred == 1) {
-    i += 1;
-    broadcast_right.transfer_data(x_ptr, Nx, exit_task_id);
-  } else {
-    timestamp.get_timestamp(&tscEndBuffer);
     sys_mod.unblock_cmd_stream();
-  }
 }
 
 fn f_memcpy_timestamps() void {
@@ -102,16 +77,14 @@ comptime {
   @bind_local_task(bcast_right, bcast_right_id);
   @bind_local_task(finish_sync, finish_sync_id);
 
-  broadcast_right.configure_network();
   chain_reduce_left.configure_network();
-  reduce.configure_network();
+  two_way_bcast.configure_network();
   @rpc(@get_data_task_id(sys_mod.LAUNCH));
 
   @export_symbol(x_ptr, "x");
   @export_symbol(ptr_time_buf_u16, "time_buf_u16");
   @export_symbol(ptr_time_ref, "time_ref");
 
-  @export_symbol(compute);
   @export_symbol(f_sync);
   @export_symbol(f_memcpy_timestamps);
 }

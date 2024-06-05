@@ -1,0 +1,106 @@
+const color_config = @import_module("modules/wse2_color_config.csl");
+const layout_module = @import_module("<layout>");
+param broadcast_color: color;
+param color_2: color;
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param timestamp: imported_module;
+param M: u32;
+param N: u32;
+param root_x: u32;
+param root_y: u32;
+
+const root_id = comptime root_y * N + root_x;
+const NUM_PES = M * N;
+
+const broadcast_color_addr: u16 = color_config.get_color_config_addr(broadcast_color);
+
+var id_x: u32 = 0;
+var id_y: u32 = 0;
+var pe_id: u32 = 0;
+var invalid_f32 = @zeros([1]f32);
+
+var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = broadcast_color});
+var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = broadcast_color});
+var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
+
+const dsr_mem_dest = @get_dsr(dsr_dest, 1);
+const dsr_mem_src1 = @get_dsr(dsr_src1, 1);
+const dsr_fabout = @get_dsr(dsr_dest, 0);
+const dsr_fabin = @get_dsr(dsr_src1, 0);
+
+fn get_rx() u16 {
+  if (pe_id == root_id) return color_config.INPUT_RAMP;
+  if (root_y == id_y) {
+    if (root_x < id_x) return color_config.INPUT_WEST;
+    return color_config.INPUT_EAST;
+  }
+
+  if (root_y < id_y) return color_config.INPUT_NORTH;
+  return color_config.INPUT_SOUTH;
+}
+
+fn get_tx() u16 {
+  if (pe_id == root_id) {
+    // return .{SOUTH, EAST};
+    return color_config.OUTPUT_SOUTH | color_config.OUTPUT_EAST;
+  }
+
+  if (id_y == 0) {
+    if (id_x == N - 1) {
+      // return .{RAMP, SOUTH};
+      return color_config.OUTPUT_RAMP | color_config.OUTPUT_SOUTH;
+    }
+    // return .{RAMP, SOUTH, EAST};
+    return color_config.OUTPUT_RAMP | color_config.OUTPUT_SOUTH | color_config.OUTPUT_EAST;
+  }
+
+  if (id_y == M - 1) return color_config.OUTPUT_RAMP;
+
+  // return .{RAMP, SOUTH};
+  return color_config.OUTPUT_RAMP | color_config.OUTPUT_SOUTH;
+}
+
+
+fn setup() void {
+  id_x = @as(u32, layout_module.get_x_coord());
+  id_y = @as(u32, layout_module.get_y_coord());
+  pe_id = id_y * N + (if (id_y % 2 == 0) id_x else N - id_x - 1);
+  configure();
+}
+
+fn configure() void {
+  var r_state : u16 = @bitcast(*u16, broadcast_color_addr).*;
+
+  // reset pos0 input/ output to nothing:
+  r_state = r_state & color_config.MASK_INPUT_OUTPUT_POS0;
+
+  r_state = r_state | get_rx() | get_tx();
+  @block(broadcast_color);
+  @bitcast(*u16, broadcast_color_addr).* = r_state;
+}
+
+fn configure_network() void {
+
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate: local_task_id, tsc_start_ptr: *[3]u16) void {
+  fabin = @set_dsd_length(fabin, count);
+  fabout = @set_dsd_length(fabout, count);
+  mem = @set_dsd_length(mem, count);
+  mem = @set_dsd_base_addr(mem, buf);
+
+  @load_to_dsr(dsr_fabin, fabin);
+  @load_to_dsr(dsr_fabout, fabout);
+  @load_to_dsr(dsr_mem_src1, mem);
+  @load_to_dsr(dsr_mem_dest, mem);
+
+  timestamp.get_timestamp(tsc_start_ptr);
+
+  if (pe_id == root_id) {
+    @fmovs(dsr_fabout, dsr_mem_src1);
+  } else {
+    @fmovs(dsr_mem_dest, dsr_fabin);
+  }
+  @activate(activate);
+}

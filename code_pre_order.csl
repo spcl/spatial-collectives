@@ -5,6 +5,7 @@ param Pw: u16;
 param algo: u16;
 param is_allred: u16;
 param step: u16;
+param import_name: comptime_string;
 
 const sys_mod = @import_module("<memcpy/memcpy>", memcpy_params);
 const exit_task_id: local_task_id = @get_local_task_id(18);
@@ -17,7 +18,7 @@ const broadcast_right = @import_module("modules/broadcast.csl", .{.color_1 = @ge
 
 const chain_reduce_left = @import_module("modules/reduce.csl", .{.color_1 = @get_color(10), .color_2 = @get_color(11), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = 8, .algo = 0, .timestamp = timestamp});
 
-const reduce = @import_module("modules/reduce.csl", .{.color_1 = @get_color(12), .color_2 = @get_color(13), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = step, .algo = algo, .timestamp = timestamp});
+const reduce = @import_module(import_name, .{.color_1 = @get_color(12), .color_2 = @get_color(13), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .timestamp = timestamp});
 
 
 // tsc_size_words = 3
@@ -39,8 +40,7 @@ var x_ptr: [*]f32 = &x;
 var dummy = @zeros([4096]f32);
 const dummy_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{4096} -> dummy[i]});
 var xd = @zeros([2*(Pw - pe_id)]f32);
-// best so far is: 1.629x
-const xd_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{@as(u16,1.629*@as(f32,(Pw - pe_id)))} -> xd[i]});
+const xd_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{@as(u16, 1.629*@as(f32, (Pw - pe_id)))} -> xd[i]});
 
 var i: u16 = 0;
 

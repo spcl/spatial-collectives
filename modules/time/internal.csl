@@ -1,0 +1,44 @@
+// Private Interface
+const config = @import_module("<tile_config>");
+
+fn set_tsc_ctrl_reg(value : u16) void {
+  @bitcast(*u16, @as(u16, config.addresses.PERF_COUNTER_CONTROL)).* = value;
+}
+
+fn read_tsc_ctrl_reg() u16 {
+  return @bitcast(*u16, @as(u16, config.addresses.PERF_COUNTER_CONTROL)).*;
+}
+
+// Public Interface
+const tsc_size_words = config.target.tsc_size_words;
+
+fn enable_tsc() void {
+  set_tsc_ctrl_reg(7);
+
+  // automatically reset the timestamps to avoid a random number
+  reset_tsc_counter();
+}
+
+fn disable_tsc() void {
+  set_tsc_ctrl_reg(0);
+}
+
+// This is in little endian order, so least significant word of timestamp is in
+// timestamp[0]
+fn get_timestamp(result : *[tsc_size_words]u16) void {
+  var base = @as(u16, config.addresses.TIMESTAMP_COUNTER);
+  for (@range(u16, tsc_size_words)) |i| {
+    (result.*)[i] = @bitcast(*u16, base + config.word_size * i).*;
+  }
+}
+
+// Timestamp counters on hardware begin execution as a random 48-bit number.
+// If the tsc wraps around between two timestamps, then the elapsed cycle
+// count is not useful. We can avoid wraparounds by resetting the tsc to 0.
+fn reset_tsc_counter() void {
+  const tsc_size_words = config.target.tsc_size_words;
+  var base = @as(u16, config.addresses.TIMESTAMP_COUNTER);
+  for (@range(u16, tsc_size_words)) |i| {
+    @bitcast(*u16, base + config.word_size * i).* = 0;
+  }
+}

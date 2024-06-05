@@ -1,21 +1,23 @@
 param color_1: color;
 param color_2: color;
-
 param pe_id: u32;
-
 param POS_DIR: direction;
 param NEG_DIR: direction;
 param NUM_PES: u32;
+param timestamp: imported_module;
 
 const in_color = comptime get_in_color();
 const out_color = comptime get_out_color();
 
 var invalid_f32 = @zeros([1]f32);
 
-var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = out_color, .output_queue = @get_output_queue(comptime get_out_q_id()) });
-var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = in_color, .input_queue = @get_input_queue(comptime get_in_q_id()) });
+var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = out_color});
+var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = in_color});
 var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
 
+const dsr_mem = @get_dsr(comptime if (pe_id == NUM_PES - 1) dsr_src1 else dsr_src0, 0);
+const dsr_fabout = @get_dsr(dsr_dest, 0);
+const dsr_fabin = @get_dsr(dsr_src1, 0);
 
 fn get_in_color() color {
   if (pe_id % 2 == 0) {
@@ -33,67 +35,36 @@ fn get_out_color() color {
   return color_1;
 }
 
-fn get_in_q_id() u32 {
-  if (pe_id % 2 == 0) {
-    return 2;
-  }
-
-  return 2;
-}
-
-fn get_out_q_id() u32 {
-  if (pe_id % 2 == 0) {
-    return 2;
-  }
-
-  return 2;
-}
-
-
 fn configure_network() void {
   @block(in_color);
   @set_local_color_config(in_color, .{.routes = .{.rx = .{POS_DIR}, .tx = .{RAMP}}});
   @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}});
-  // Initialize input queue
-  // @initialize_queue(@get_input_queue(comptime get_in_q_id()), .{.color = in_color});
 }
 
-fn fabin_to_mem(m: mem1d_dsd, f: fabin_dsd, activate: color) void {
-  @mov32(m, f, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn mem_to_fabout(f: fabout_dsd, m: mem1d_dsd, activate: color) void {
-  @mov32(f, m, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn fadds(dst: anytype, src0: anytype, src1: anytype, activate: color) void {
-  @fadds(dst, src0, src1, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn mem_to_fabout_no_activate(f: fabout_dsd, m: mem1d_dsd) void {
-  @mov32(f, m, .{ .async = true });
-}
-
-fn transfer_data(buf: [*]f32, count: u16, activate: color) void {
+fn transfer_data(buf: [*]f32, count: u16, activate: local_task_id, tsc_start_ptr: *[3]u16) void {
 
   fabin = @set_dsd_length(fabin, count);
   fabout = @set_dsd_length(fabout, count);
   mem = @set_dsd_length(mem, count);
-
   mem = @set_dsd_base_addr(mem, buf);
+
+  @load_to_dsr(dsr_fabin, fabin);
+  @load_to_dsr(dsr_fabout, fabout);
+  @load_to_dsr(dsr_mem, mem);
+
+  timestamp.get_timestamp(tsc_start_ptr);
 
   switch (pe_id) {
     0 => {
-      fadds(mem, mem, fabin, activate);
+      @fadds(dsr_mem, dsr_mem, dsr_fabin);
     },
     (NUM_PES - 1) => {
-      mem_to_fabout(fabout, mem, activate);
+      @fmovs(dsr_fabout, dsr_mem);
     },
     else => {
-      fadds(fabout, mem, fabin, activate);
+      @fadds(dsr_fabout, dsr_mem, dsr_fabin);
     }
   }
+
+  @activate(activate);
 }

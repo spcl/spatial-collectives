@@ -1,0 +1,124 @@
+param color_1: color;
+param pe_id: u32;
+param timestamp: imported_module;
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param NUM_PES: u32;
+
+const repeat_id = @get_local_task_id(13);
+const fabin_dsr = @get_dsr(dsr_src1, 2);
+const fabout_dsr= @get_dsr(dsr_dest, 2);
+const mem_dsr = @get_dsr(dsr_src1, 3);
+const mem_dsr_src0 = @get_dsr(dsr_src0, 3);
+const temp_mem_dsr = @get_dsr(dsr_src0, 2);
+const temp_mem_dsr_inc_mem = @get_dsr(dsr_src1, 1);
+
+const in_color = comptime get_in_color();
+const out_color = comptime get_out_color();
+const temp_mem = @zeros([4]f32);
+
+var invalid_f32 = @zeros([1]f32);
+
+var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = out_color, .advance_switch=true});
+var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = in_color, .input_queue = @get_input_queue(3)});
+var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
+var i: u16 = 0;
+
+fn get_in_color() color {
+  return color_1;
+}
+
+fn get_out_color() color {
+  return color_1;
+}
+const switches_sender = .{
+  .pos1 = .{ .rx = POS_DIR },
+  .current_switch_pos = 0,
+  .ring_mode = false
+};
+
+fn reduction(value : f32, sum : *f32) f32 {
+  return sum.* + value;
+}
+
+
+fn configure_network() void {
+  @initialize_queue(@get_input_queue(3), .{.color = color_1} );
+  @block(in_color);
+  if (comptime pe_id == 0) {
+    @set_local_color_config(in_color, .{.routes = .{.rx = .{POS_DIR}, .tx = .{RAMP}}});
+  } else {
+    @set_local_color_config(in_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}, .switches = switches_sender});
+  }
+}
+
+var activate: local_task_id;
+
+fn transfer_data_scalar(buf: [*]f32, count: u16, activate_input: local_task_id, tsc_start_ptr: *[3]u16) void {
+  activate = activate_input;
+  fabin = @set_dsd_length(fabin, 4);
+  fabout = @set_dsd_length(fabout, count);
+  mem = @set_dsd_base_addr(mem, buf);
+  mem = @set_dsd_length(mem, 1);
+  var temp_mem_dsd = @set_dsd_length(mem, 4);
+  temp_mem_dsd = @set_dsd_base_addr(temp_mem_dsd, &temp_mem);
+
+  @load_to_dsr(fabout_dsr, fabout);
+  @load_to_dsr(temp_mem_dsr, temp_mem_dsd);
+  @load_to_dsr(mem_dsr, mem);
+  @load_to_dsr(mem_dsr_src0, mem);
+  @load_to_dsr(temp_mem_dsr_inc_mem, temp_mem_dsd, .{ .save_address = true });
+
+  @load_to_dsr(fabin_dsr, fabin);
+
+  timestamp.get_timestamp(tsc_start_ptr);
+  switch (pe_id) {
+    0 => {
+      for (@range(u32, (NUM_PES - 1) / 4))|x| {
+        @fadds(temp_mem_dsr, temp_mem_dsr, fabin_dsr);
+      }
+      
+      @fadds(mem_dsr_src0, mem_dsr_src0, fabin_dsr);
+      @fadds(mem_dsr_src0, mem_dsr_src0, fabin_dsr);
+      @fadds(mem_dsr_src0, mem_dsr_src0, fabin_dsr);
+      @fadds(mem_dsr_src0, mem_dsr_src0, temp_mem_dsr_inc_mem);
+      @fadds(mem_dsr_src0, mem_dsr_src0, temp_mem_dsr_inc_mem);
+      @fadds(mem_dsr_src0, mem_dsr_src0, temp_mem_dsr_inc_mem);
+      @fadds(mem_dsr_src0, mem_dsr_src0, temp_mem_dsr_inc_mem);
+      @activate(activate);
+    },
+    else => {
+      @fmovs(fabout_dsr, mem_dsr);
+      @activate(activate);
+    }
+  }
+
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate_input: local_task_id, tsc_start_ptr: *[3]u16) void {
+  activate = activate_input;
+  fabin = @set_dsd_length(fabin, count);
+  fabout = @set_dsd_length(fabout, count);
+  mem = @set_dsd_base_addr(mem, buf);
+  mem = @set_dsd_length(mem, count);
+
+  @load_to_dsr(fabout_dsr, fabout);
+  @load_to_dsr(mem_dsr, mem);
+  @load_to_dsr(mem_dsr_src0, mem);
+  @load_to_dsr(fabin_dsr, fabin);
+
+  timestamp.get_timestamp(tsc_start_ptr);
+  switch (pe_id) {
+    0 => {
+      for (@range(u32, NUM_PES - 1))|x| {
+        @fadds(mem_dsr_src0, mem_dsr_src0, fabin_dsr);
+      }
+      @activate(activate);
+    },
+    else => {
+      @fmovs(fabout_dsr, mem_dsr);
+      @activate(activate);
+    }
+  }
+
+}

@@ -1,0 +1,3229 @@
+const ctrl_module = @import_module("modules/ctrl_module.csl");
+const consts = @import_module("modules/constants.csl");
+const color_config = @import_module("modules/wse2_color_config_with_params.csl", .{.POS_DIR = POS_DIR, .NEG_DIR =NEG_DIR});
+const layout_module = @import_module("<layout>");
+param color_1: color;
+param color_2: color;
+param POS_DIR: direction;
+param NEG_DIR: direction;
+param NUM_PES: u32;
+param timestamp: imported_module;
+param rev: bool;
+param is_x: bool;
+
+const color_1_addr: u16 = color_config.get_color_config_addr(color_1);
+const color_2_addr: u16 = color_config.get_color_config_addr(color_2);
+const switch_1_addr: u16 = consts.SWITCHES_BASE + @get_int(color_1);
+const switch_2_addr: u16 = consts.SWITCHES_BASE + @get_int(color_2);
+
+const switch_1_ptr: *u16 = @bitcast(*u16, 2 * switch_1_addr);
+const switch_2_ptr: *u16 = @bitcast(*u16, 2 * switch_2_addr);
+
+var pe_id: u32 = 0;
+var rev_id: u32 = 0;
+var in_color: color = color_1;
+var out_color: color = color_2;
+var cnt_color: u32 = 0;
+var is_ctrl: bool = false;
+var rcvd_cnt: u32 = 0;
+var rcv_cnt: u32 = 0;
+var activate: local_task_id;
+var snd_visited: bool = false;
+var ctrl_mem_loc = @constants([1]u32, comptime ctrl_module.ctrl(true, ctrl_module.opcode_switch_advance, 0x00));
+
+var invalid_f32 = @zeros([1]f32);
+var fabout_1 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1});
+var fabout_1_advance = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1, .advance_switch = true});
+var fabout_2 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_2});
+var fabout_2_advance = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_2, .advance_switch = true});
+var fabin_1 = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_1});
+var fabin_2 = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_2});
+var ctrl_1 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1, .control = true});
+var ctrl_2 = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_2, .control = true});
+var fabin: fabin_dsd;
+var fabout: fabout_dsd;
+var ctrl: fabout_dsd;
+var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
+var ctrl_mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> ctrl_mem_loc[i] });
+
+const dsr_mem = @get_dsr(dsr_src0, 0);
+const dsr_mem_src1 = @get_dsr(dsr_src1, 1);
+const dsr_fabout = @get_dsr(dsr_dest, 0);
+const dsr_fabin = @get_dsr(dsr_src1, 0);
+const dsr_ctrl = @get_dsr(dsr_dest, 1);
+const dsr_mem_ctrl = @get_dsr(dsr_src1, 2);
+
+fn setup() void {
+  var x = @as(u32, if (is_x) layout_module.get_x_coord() else layout_module.get_y_coord());
+  pe_id = if (rev) NUM_PES - x - 1 else x;
+  rev_id = NUM_PES - pe_id - 1;
+ if (pe_id == 0) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 13;
+    is_ctrl = false;
+ }
+ if (pe_id == 1) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 2) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = true;
+ }
+ if (pe_id == 3) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 4) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 5) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 6) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 7) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = true;
+ }
+ if (pe_id == 8) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 9) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 10) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 11) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 12) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 13) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 14) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 15) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 16) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = true;
+ }
+ if (pe_id == 17) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 18) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 19) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 20) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 21) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 22) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 23) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 24) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 25) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 26) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 27) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 28) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 29) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 30) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = true;
+ }
+ if (pe_id == 31) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 32) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 33) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 34) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 35) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 36) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 37) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 38) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 39) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 40) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 41) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 42) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 43) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 44) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 45) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 46) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 47) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 48) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 49) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 50) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = true;
+ }
+ if (pe_id == 51) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 52) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 53) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 54) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 55) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 56) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 6;
+    is_ctrl = false;
+ }
+ if (pe_id == 57) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 58) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 59) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 60) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 61) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 62) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 63) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 64) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 65) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 66) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 67) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 68) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 69) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 70) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 71) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 72) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 73) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 74) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 75) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 76) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 77) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 6;
+    is_ctrl = true;
+ }
+ if (pe_id == 78) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 79) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 80) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 81) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 82) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 83) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 84) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 7;
+    is_ctrl = false;
+ }
+ if (pe_id == 85) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 86) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 87) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 88) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 89) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 90) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 91) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 92) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 93) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 94) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 95) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 96) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 97) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 98) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 99) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 100) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 101) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 102) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 103) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 104) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 105) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 6;
+    is_ctrl = false;
+ }
+ if (pe_id == 106) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 107) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 108) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 109) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 110) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 111) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 112) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 7;
+    is_ctrl = true;
+ }
+ if (pe_id == 113) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 114) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 115) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 116) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 117) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 118) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 119) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 120) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 8;
+    is_ctrl = false;
+ }
+ if (pe_id == 121) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 122) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 123) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 124) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 125) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 126) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 127) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 128) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 129) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 130) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 131) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 132) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 133) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 134) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 135) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 136) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 137) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 138) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 139) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 140) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 141) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 6;
+    is_ctrl = false;
+ }
+ if (pe_id == 142) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 143) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 144) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 145) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 146) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 147) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 148) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 7;
+    is_ctrl = false;
+ }
+ if (pe_id == 149) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 150) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 151) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 152) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 153) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 154) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 155) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 156) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 8;
+    is_ctrl = true;
+ }
+ if (pe_id == 157) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 158) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 159) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 160) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 161) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 162) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 163) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 164) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 165) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 9;
+    is_ctrl = false;
+ }
+ if (pe_id == 166) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 167) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 168) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 169) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 170) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 171) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 172) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 173) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 174) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 175) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 176) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 177) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 178) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 179) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 180) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 181) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 182) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 183) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 184) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 185) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 186) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 6;
+    is_ctrl = false;
+ }
+ if (pe_id == 187) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 188) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 189) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 190) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 191) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 192) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 193) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 7;
+    is_ctrl = false;
+ }
+ if (pe_id == 194) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 195) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 196) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 197) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 198) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 199) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 200) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 201) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 8;
+    is_ctrl = false;
+ }
+ if (pe_id == 202) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 203) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 204) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 205) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 206) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 207) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 208) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 209) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 210) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 9;
+    is_ctrl = true;
+ }
+ if (pe_id == 211) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 212) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 213) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 214) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 215) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 216) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 217) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 218) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 219) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 220) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 10;
+    is_ctrl = false;
+ }
+ if (pe_id == 221) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 222) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 223) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 224) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 225) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 226) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 227) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 228) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 229) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 230) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 231) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 232) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 233) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 234) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 235) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 236) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 237) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 238) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 239) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 240) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 241) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 242) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 243) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 6;
+    is_ctrl = false;
+ }
+ if (pe_id == 244) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 245) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 246) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 247) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 248) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 249) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 250) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 7;
+    is_ctrl = false;
+ }
+ if (pe_id == 251) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 252) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 253) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 254) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 255) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 256) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 257) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 258) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 8;
+    is_ctrl = false;
+ }
+ if (pe_id == 259) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 260) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 261) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 262) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 263) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 264) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 265) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 266) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 267) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 9;
+    is_ctrl = true;
+ }
+ if (pe_id == 268) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 269) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 270) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 271) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 272) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 273) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 274) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 275) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 276) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 277) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 10;
+    is_ctrl = false;
+ }
+ if (pe_id == 278) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 279) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 280) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 281) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 282) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 283) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 284) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 285) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 286) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 287) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 288) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 289) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 290) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 291) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 292) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 293) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 294) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 295) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 296) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 297) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 298) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 6;
+    is_ctrl = false;
+ }
+ if (pe_id == 299) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 300) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 301) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 302) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 303) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 304) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 305) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 7;
+    is_ctrl = false;
+ }
+ if (pe_id == 306) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 307) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 308) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 309) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 310) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 311) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 312) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 313) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 8;
+    is_ctrl = false;
+ }
+ if (pe_id == 314) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 315) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 316) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 317) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 318) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 319) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 320) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 321) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 322) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 9;
+    is_ctrl = false;
+ }
+ if (pe_id == 323) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 324) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 325) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 326) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 327) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 328) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 329) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 330) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 331) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 332) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 10;
+    is_ctrl = true;
+ }
+ if (pe_id == 333) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 334) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 335) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 336) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 337) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 338) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 339) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 340) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 341) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 342) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 343) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 11;
+    is_ctrl = false;
+ }
+ if (pe_id == 344) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 345) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 346) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 347) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 348) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 349) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 350) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 351) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 352) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 353) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 354) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 355) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 356) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 357) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 358) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 359) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 360) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 361) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 362) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 363) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 364) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 6;
+    is_ctrl = false;
+ }
+ if (pe_id == 365) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 366) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 367) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 368) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 369) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 370) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 371) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 7;
+    is_ctrl = false;
+ }
+ if (pe_id == 372) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 373) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 374) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 375) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 376) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 377) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 378) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 379) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 8;
+    is_ctrl = false;
+ }
+ if (pe_id == 380) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 381) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 382) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 383) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 384) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 385) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 386) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 387) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 388) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 9;
+    is_ctrl = false;
+ }
+ if (pe_id == 389) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 390) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 391) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 392) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 393) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 394) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 395) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 396) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 397) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 398) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 10;
+    is_ctrl = false;
+ }
+ if (pe_id == 399) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 400) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 401) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 402) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 403) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 404) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 405) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 406) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 407) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 408) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 409) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 11;
+    is_ctrl = true;
+ }
+ if (pe_id == 410) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 411) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 412) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 413) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 414) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 415) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 416) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 417) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 418) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 419) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 420) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 421) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 12;
+    is_ctrl = true;
+ }
+ if (pe_id == 422) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 1;
+    is_ctrl = false;
+ }
+ if (pe_id == 423) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 424) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 2;
+    is_ctrl = false;
+ }
+ if (pe_id == 425) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 426) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 427) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 3;
+    is_ctrl = false;
+ }
+ if (pe_id == 428) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 429) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 430) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 431) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 4;
+    is_ctrl = false;
+ }
+ if (pe_id == 432) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 433) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 434) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 435) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 436) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 5;
+    is_ctrl = false;
+ }
+ if (pe_id == 437) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 438) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 439) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 440) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 441) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 442) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 6;
+    is_ctrl = false;
+ }
+ if (pe_id == 443) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 444) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 445) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 446) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 447) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 448) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 449) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 7;
+    is_ctrl = false;
+ }
+ if (pe_id == 450) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 451) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 452) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 453) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 454) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 455) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 456) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 457) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 8;
+    is_ctrl = false;
+ }
+ if (pe_id == 458) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 459) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 460) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 461) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 462) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 463) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 464) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 465) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 466) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 9;
+    is_ctrl = false;
+ }
+ if (pe_id == 467) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 468) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 469) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 470) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 471) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 472) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 473) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 474) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 475) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 476) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 10;
+    is_ctrl = false;
+ }
+ if (pe_id == 477) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 478) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 479) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 480) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 481) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 482) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 483) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 484) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 485) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 486) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 487) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 11;
+    is_ctrl = false;
+ }
+ if (pe_id == 488) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 489) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 490) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 491) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 492) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 493) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 494) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 495) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 496) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 497) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 498) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+ if (pe_id == 499) {
+    out_color = color_1;
+   in_color = color_2;
+    rcv_cnt = 12;
+    is_ctrl = true;
+ }
+ if (pe_id == 500) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 501) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 502) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 503) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 504) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 505) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 506) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 507) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 508) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 509) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 510) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = false;
+ }
+ if (pe_id == 511) {
+    out_color = color_2;
+   in_color = color_1;
+    rcv_cnt = 0;
+    is_ctrl = true;
+ }
+  // cnt_color = get_cnt_color(pe_id);
+  // in_color = get_in_color(pe_id, rev_id);
+  // out_color = get_out_color(pe_id, rev_id);
+  // is_ctrl = send_ctrl(pe_id, rev_id);
+  // rcv_cnt = recv_count(pe_id, rev_id);
+  
+  // configure_switch_out();
+  configure_switch_in();
+  configure_in();
+  configure_out();
+  if (is_ctrl) {
+    fabout = if (color_1 == out_color) fabout_1 else fabout_2;
+  } else {
+    fabout = if (color_1 == out_color) fabout_1_advance else fabout_2_advance;
+  }
+  fabin = if (color_1 == in_color) fabin_1 else fabin_2;
+  ctrl = if (color_1 == out_color) ctrl_1 else ctrl_2;
+}
+
+fn configure_in() void {
+  var r_state : u16 = @bitcast(*u16, if (color_1 == in_color) color_1_addr else color_2_addr).*;
+
+  // reset pos0 input/ output to nothing:
+  r_state = r_state & color_config.MASK_INPUT_OUTPUT_POS0;
+  
+  r_state = r_state | color_config.INPUT_POS | (if (rcv_cnt == 0) color_config.OUTPUT_NEG else color_config.OUTPUT_RAMP);
+  @block(in_color);
+  @bitcast(*u16, if (color_1 == in_color) color_1_addr else color_2_addr).* = r_state;
+}
+
+fn configure_switch_in() void {
+  var switch_mask: u16 = comptime consts.switch_pos1(NEG_DIR, 0, 0);
+
+  (if (in_color == color_1) switch_1_ptr else switch_2_ptr).* = switch_mask;
+}
+
+fn configure_out() void {
+  var r_state : u16 = @bitcast(*u16, if (color_1 == out_color) color_1_addr else color_2_addr).*;
+
+  // reset pos0 input/ output to nothing:
+  r_state = r_state & color_config.MASK_INPUT_OUTPUT_POS0;
+  
+  r_state = r_state | color_config.INPUT_RAMP | color_config.OUTPUT_NEG;
+
+  @bitcast(*u16, if (color_1 == out_color) color_1_addr else color_2_addr).* = r_state;
+}
+
+fn configure_switch_out() void {
+  var switch_mask: u16 = consts.switch_pos1(POS_DIR, 0, 0);
+
+  @bitcast(*u16, 2 * (if (out_color == color_1) switch_1_addr else switch_2_addr)).* = switch_mask;
+}
+const switches_sender = .{
+  .pos1 = .{ .rx = POS_DIR },
+  .current_switch_pos = 0,
+  .ring_mode = false
+};
+fn configure_network() void {
+
+  // @block(in_color);
+  @set_local_color_config(color_1, .{.routes = .{.rx = .{}, .tx = .{}}, .switches = switches_sender});
+  @set_local_color_config(color_2, .{.routes = .{.rx = .{}, .tx = .{}}, .switches = switches_sender});
+  // @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}});
+}
+
+fn transfer_data(buf: [*]f32, count: u16, activate_input: local_task_id, tsc_start_ptr: *[3]u16) void {
+  activate = activate_input;
+  fabin = @set_dsd_length(fabin, count);
+  fabout = @set_dsd_length(fabout, count);
+  mem = @set_dsd_length(mem, count);
+  mem = @set_dsd_base_addr(mem, buf);
+  rcvd_cnt = 1;
+  @load_to_dsr(dsr_mem, mem);
+  @load_to_dsr(dsr_mem_src1, mem);
+  @load_to_dsr(dsr_fabin, fabin);
+  @load_to_dsr(dsr_fabout, fabout);
+  @load_to_dsr(dsr_ctrl, ctrl);
+  @load_to_dsr(dsr_mem_ctrl, ctrl_mem);
+  timestamp.get_timestamp(tsc_start_ptr);
+  while (rcvd_cnt < rcv_cnt) {
+    rcvd_cnt += 1;
+    @fadds(dsr_mem, dsr_mem, dsr_fabin);
+  }
+
+  if (rcv_cnt > 0 and pe_id > 0) {
+    @fadds(dsr_fabout, dsr_mem, dsr_fabin);
+  } else if (rcv_cnt == 0) {
+    @mov32(dsr_fabout, dsr_mem_src1);
+  } else {
+    @fadds(dsr_mem, dsr_mem, dsr_fabin);
+  }
+
+  if (is_ctrl) {
+    @mov32(dsr_ctrl, dsr_mem_ctrl);
+  }
+
+  @activate(activate);
+}

@@ -1,0 +1,98 @@
+////////////////////////////////////////////////////////////////////////////////
+// Indices of bits used in constructing routing table masks
+////////////////////////////////////////////////////////////////////////////////
+
+// rx bits
+const OUTPUT_WEST: u16 = 0;
+const OUTPUT_EAST: u16 = 1;
+const OUTPUT_SOUTH: u16 = 2;
+const OUTPUT_NORTH: u16 = 3;
+const OUTPUT_RAMP: u16 = 4;
+
+// tx bits
+const INPUT_WEST: u16 = 5;
+const INPUT_EAST: u16 = 6;
+const INPUT_SOUTH: u16 = 7;
+const INPUT_NORTH: u16 = 8;
+const INPUT_RAMP: u16 = 9;
+
+// Function that maps directions to tx bit indices in the routing mask
+fn tx_bit(dir: direction) u16 {
+  if (dir == EAST) {
+    return OUTPUT_EAST;
+  } else if (dir == WEST) {
+    return OUTPUT_WEST;
+  } else if (dir == NORTH) {
+    return OUTPUT_NORTH;
+  } else if (dir == SOUTH) {
+    return OUTPUT_SOUTH;
+  } else {
+    @comptime_assert(false);
+  }
+}
+
+// Function that maps directions to rx bit indices in the routing mask
+fn rx_bit(dir: direction) u16 {
+  if (dir == EAST) {
+    return INPUT_EAST;
+  } else if (dir == WEST) {
+    return INPUT_WEST;
+  } else if (dir == NORTH) {
+    return INPUT_NORTH;
+  } else if (dir == SOUTH) {
+    return INPUT_SOUTH;
+  } else {
+    @comptime_assert(false);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Bit values and indices used to construct the fabric switching mask
+////////////////////////////////////////////////////////////////////////////////
+
+// Indices of the 3 switch positions within the mask
+const POS1: u16 = 0;
+const POS2: u16 = 4;
+const POS3: u16 = 8;
+
+// Index of the bit that selects whether the position is an rx or a tx
+const POS1_SELECT: u16 = 3;
+
+// Values of the switch direction field
+const SWITCH_WEST: u16 = 0;
+const SWITCH_EAST: u16 = 1;
+const SWITCH_RAMP: u16 = 4;
+const SWITCH_INVALID: u16 = 5;
+
+// Index of the bit that contains the current switch position
+const SWITCH_CUR_POS: u16 = 13;
+
+// Index of the bit that determines the pop mode
+const POP_MODE: u16 = 12;
+
+// Values of the pop mode bits
+const ALWAYS_POP: u16 = 1;
+
+// Constructs a pos1 switch mask with pos2 and pos3 being invalid
+fn switch_pos1(dir: direction, input: u16, init_pos: u16) u16 {
+  var mask: u16 = (SWITCH_INVALID << POS2) | (SWITCH_INVALID << POS3);
+
+  const dir_val: u16 = tx_bit(dir);
+
+  mask |= (dir_val << POS1) | (input << POS1_SELECT) | (init_pos << SWITCH_CUR_POS);
+  return mask;
+}
+
+const fully_invalid_switch = (SWITCH_INVALID << POS1) | (SWITCH_INVALID << POS2) | (SWITCH_INVALID << POS3);
+
+////////////////////////////////////////////////////////////////////////////////
+// Base addresses for the routing table and fabric switching table
+////////////////////////////////////////////////////////////////////////////////
+
+const ROUTES_BASE: u16 = 0x7f20;
+const SWITCHES_BASE: u16 = 0x7f40;
+
+// The constants in this file only apply on EIN and FYN
+comptime {
+  @comptime_assert(@is_arch("wse1") or @is_arch("wse2"));
+}

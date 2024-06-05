@@ -7,26 +7,9 @@ param NUM_PES: u32;
 
 var invalid_f32 = @zeros([1]f32);
 
-var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1, .output_queue = @get_output_queue(comptime get_out_q_id()) });
-var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_1, .input_queue = @get_input_queue(comptime get_in_q_id()) });
+var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = color_1, .output_queue=@get_output_queue(3)});
+var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = color_1, .input_queue=@get_input_queue(3)});
 var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
-
-
-fn get_in_q_id() u32 {
-  if (pe_id % 2 == 0) {
-    return 3;
-  }
-
-  return 3;
-}
-
-fn get_out_q_id() u32 {
-  if (pe_id % 2 == 0) {
-    return 3;
-  }
-
-  return 3;
-}
 
 
 fn configure_network() void {
@@ -42,39 +25,21 @@ fn configure_network() void {
   }
 }
 
-fn fabin_to_mem(m: mem1d_dsd, f: fabin_dsd, activate: local_task_id) void {
-  @mov32(m, f, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn mem_to_fabout(f: fabout_dsd, m: mem1d_dsd, activate: local_task_id) void {
-  @mov32(f, m, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn fadds(dst: anytype, src0: anytype, src1: anytype, activate: local_task_id) void {
-  @fadds(dst, src0, src1, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn mem_to_fabout_no_activate(f: fabout_dsd, m: mem1d_dsd) void {
-  @mov32(f, m, .{ .async = true });
-}
-
 fn transfer_data(buf: [*]f32, count: u16, activate: local_task_id) void {
 
   fabin = @set_dsd_length(fabin, count);
   fabout = @set_dsd_length(fabout, count);
   mem = @set_dsd_length(mem, count);
-
   mem = @set_dsd_base_addr(mem, buf);
 
   switch (pe_id) {
     0 => {
-      mem_to_fabout(fabout, mem, activate);
+      @fmovs(fabout, mem);
     },
     else => {
-      fabin_to_mem(mem, fabin, activate);
+      @fmovs(mem, fabin);
     }
   }
+
+  @activate(activate);
 }

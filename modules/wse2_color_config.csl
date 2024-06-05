@@ -1,0 +1,96 @@
+// The color_config.csl provides three functions
+// - get_color_config_addr
+//   return address of a color config register
+// - set_offramp
+//   set the offramp bit
+// - toggle_offramp
+//   toggle the offramp bit
+// Color Config Register
+//
+// wse2: 0x7f20 - 0x7f37
+// 1 register per color
+//
+// Bit 15 Point to point mode
+// Bit 14 Teardown in progress.
+// Bit 13:12 Control wavelet pop mode
+// Bit 11 Color swap for E,W inputs.
+// Bit 10 Color swap for N,S inputs.
+// -- Bits 9:5 define the initial input switch position on switching colors --
+// Bits 9 Onramp Input mask
+// Bits 8 North Input mask
+// Bits 7 South Input mask
+// Bits 6 East Input mask
+// Bits 5 West Input mask
+// -- Bits 0:4 define the initial output switch position on switching colors --
+// Bits 4 Offramp Output mask
+// Bits 3 North Output mask
+// Bits 2 South Output mask
+// Bits 1 East Output mask
+// Bits 0 West Output masl
+const tile_config = @import_module("<tile_config>");
+// Offramp output direction bit for color
+// FYN and SDR have the same bit (bit-4) on output offramp
+var offramp_bit: u16 = 0x0010;
+// word_size = 2
+const word_size = tile_config.target.word_size;
+const addresses = tile_config.target.addresses;
+// COLOR_CONFIG is byte address
+// wse2: 0x7f20 * word_size
+// wse3: 0x7c00 * word_size
+fn get_color_config_addr( RXACT: color) u16 {
+  return @as(u16,addresses.COLOR_CONFIG) + @get_int(RXACT) * word_size;
+}
+// offramp is ON no matter the status it was.
+fn set_offramp(COLOR_CONFIG_ADDR: u16) void {
+  var r_state : u16 = @bitcast(*u16, COLOR_CONFIG_ADDR ).* ;
+  var r_tmp : u16 = offramp_bit;
+  r_state = r_state | r_tmp ;
+  @bitcast(*u16, COLOR_CONFIG_ADDR ).* = r_state;
+}
+// toggle the status of offramp.
+// case 1: offramp is ON --> new status is off
+// case 2: offramp is OFF --> new status is on
+fn toggle_offramp(COLOR_CONFIG_ADDR: u16) void {
+  var r_state: u16 = @bitcast(*u16, COLOR_CONFIG_ADDR ).*;
+  var r_tmp: u16 = offramp_bit;
+  r_state = r_state ^ r_tmp;
+  @bitcast(*u16, COLOR_CONFIG_ADDR ).* = r_state;
+}
+fn remove_offramp(COLOR_CONFIG_ADDR: u16) void {
+  var r_state: u16 = @bitcast(*u16, COLOR_CONFIG_ADDR ).*;
+  var r_tmp: u16 = offramp_bit;
+  if ( 0 < (r_state & r_tmp) ){  // RAMP is on
+    r_state = r_state ^ r_tmp; // remove RAMP
+  }
+  @bitcast(*u16, COLOR_CONFIG_ADDR ).* = r_state;
+}
+// bit 9:0 contains the routing of input and output
+const MASK_INPUT_OUTPUT_POS0: u16 = 0xfc00;
+// bits 0:4 define the initial output switch position
+const OUTPUT_WEST : u16  = 0x1;  // bit 0: west output mask
+const OUTPUT_EAST : u16  = 0x2;  // bit 1: east output mask
+const OUTPUT_SOUTH : u16 = 0x4;  // bit 2: south output mask
+const OUTPUT_NORTH : u16 = 0x8;  // bit 3: north output mask
+const OUTPUT_RAMP : u16  = 0x10; // bit 4: offramp output mask
+// bits 5:9 define the initial input switch position
+const INPUT_WEST : u16  = 0x20;  // bit 5: west input mask
+const INPUT_EAST : u16  = 0x40;  // bit 6: east input mask
+const INPUT_SOUTH : u16 = 0x80;  // bit 7: south input mask
+const INPUT_NORTH : u16 = 0x100; // bit 8: north input mask
+const INPUT_RAMP : u16  = 0x200; // bit 9: onramp input mask
+
+fn get_input(dir: direction) u16 {
+  if (dir == WEST) return INPUT_WEST;
+  if (dir == EAST) return INPUT_EAST;
+  if (dir == SOUTH) return INPUT_SOUTH;
+  if (dir == NORTH) return INPUT_NORTH;
+  return INPUT_RAMP;
+}
+
+fn get_output(dir: direction) u16 {
+  if (dir == WEST) return OUTPUT_WEST;
+  if (dir == EAST) return OUTPUT_EAST;
+  if (dir == SOUTH) return OUTPUT_SOUTH;
+  if (dir == NORTH) return OUTPUT_NORTH;
+  return OUTPUT_RAMP;
+}

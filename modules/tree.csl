@@ -2,8 +2,8 @@ const ctrl_module = @import_module("modules/ctrl_module.csl");
 
 param color_1: color;
 param color_2: color;
-
 param pe_id: u32;
+param timestamp: imported_module;
 
 param POS_DIR: direction;
 param NEG_DIR: direction;
@@ -11,23 +11,27 @@ param NUM_PES: u32;
 const rev_id: u32 = NUM_PES - pe_id - 1;
 const in_color = comptime get_in_color(pe_id, rev_id);
 const out_color = comptime get_out_color(pe_id, rev_id);
-const step: u32 = 2;
 const cnt_color: u32 = comptime get_cnt_color(pe_id);
 const is_ctrl = comptime send_ctrl(pe_id, rev_id);
 
 var rcvd_cnt: u32 = 0;
-
 var invalid_f32 = @zeros([1]f32);
-var activate: color;
+var activate: local_task_id;
 var snd_visited: bool = false;
 var ctrl_mem_loc = @constants([1]u32, comptime ctrl_module.ctrl(true, ctrl_module.opcode_switch_advance, 0x00));
 
 
-var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = out_color, .advance_switch = if (!is_ctrl) true else false, .output_queue = @get_output_queue(comptime get_out_q_id())});
-var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = in_color, .input_queue = @get_input_queue(comptime get_in_q_id())});
+var fabout = @get_dsd(fabout_dsd, .{ .extent = 1, .fabric_color = out_color, .advance_switch = if (!is_ctrl) true else false});
+var fabin = @get_dsd(fabin_dsd, .{ .extent = 1, .fabric_color = in_color});
 var mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> invalid_f32[i] });
-var ctrl = @get_dsd(fabout_dsd, .{.extent = 1, .fabric_color = out_color, .control = true, .output_queue = @get_output_queue(comptime get_out_q_id())});
+var ctrl = @get_dsd(fabout_dsd, .{.extent = 1, .fabric_color = out_color, .control = true});
 var ctrl_mem = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> ctrl_mem_loc[i] });
+const dsr_mem = @get_dsr(dsr_src0, 0);
+const dsr_mem_src1 = @get_dsr(dsr_src1, 1);
+const dsr_fabout = @get_dsr(dsr_dest, 0);
+const dsr_fabin = @get_dsr(dsr_src1, 0);
+const dsr_ctrl = @get_dsr(dsr_dest, 1);
+const dsr_mem_ctrl = @get_dsr(dsr_src1, 2);
 
 
 fn get_rev_id(pe_id: u32) u32{
@@ -61,22 +65,6 @@ fn get_out_color(pe_id: u32, rev_id: u32) color{
   }
 
   return color_1;
-}
-
-fn get_in_q_id() u32 {
-  if (pe_id % 2 == 0) {
-    return 3;
-  }
-
-  return 2;
-}
-
-fn get_out_q_id() u32 {
-  if (pe_id % 2 == 0) {
-    return 2;
-  }
-
-  return 3;
 }
 
 fn recv_count(pe_id: u32, rev_id: u32) u32 {
@@ -114,8 +102,6 @@ fn send_ctrl(pe_id: u32, rev_id: u32) bool {
   return false;
 }
 
-
-
 const switches_sender = .{
   .pos1 = .{ .rx = POS_DIR },
   .current_switch_pos = 0,
@@ -131,64 +117,40 @@ const switches_receiver = .{
 
 fn configure_network() void {
   @block(in_color);
-  @bind_task(execution, out_color);
   @set_local_color_config(in_color, .{.routes = .{.rx = .{POS_DIR}, .tx = if (comptime recv_count(pe_id, rev_id) == 0) .{NEG_DIR} else .{RAMP}}, .switches = switches_receiver});
 
   @set_local_color_config(out_color, .{.routes = .{.rx = .{RAMP}, .tx = .{NEG_DIR}}, .switches = switches_sender});
 }
 
-fn fabin_to_mem(m: mem1d_dsd, f: fabin_dsd, activate: color) void {
-  @mov32(m, f, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn mem_to_fabout(f: fabout_dsd, m: mem1d_dsd, activate: color) void {
-  @mov32(f, m, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn fadds(dst: anytype, src0: anytype, src1: anytype, activate: color) void {
-  @fadds(dst, src0, src1, .{ .async = true, .activate = activate });
-}
-
-// Same as `fabin_to_mem`
-fn mem_to_fabout_no_activate(f: fabout_dsd, m: mem1d_dsd) void {
-  @mov32(f, m, .{ .async = true });
-}
-
-fn transfer_data(buf: [*]f32, count: u16, activate_input: color) void {
+fn transfer_data(buf: [*]f32, count: u16, activate_input: local_task_id, tsc_start_ptr: *[3]u16) void {
   activate = activate_input;
   fabin = @set_dsd_length(fabin, count);
   fabout = @set_dsd_length(fabout, count);
   mem = @set_dsd_length(mem, count);
   mem = @set_dsd_base_addr(mem, buf);
   rcvd_cnt = 1;
-  snd_visited = false;
-
-  @activate(out_color);
-}
-
-task execution() void {
-  if (rcvd_cnt < comptime recv_count(pe_id, rev_id)) {
+  @load_to_dsr(dsr_mem, mem);
+  @load_to_dsr(dsr_mem_src1, mem);
+  @load_to_dsr(dsr_fabin, fabin);
+  @load_to_dsr(dsr_fabout, fabout);
+  @load_to_dsr(dsr_ctrl, ctrl);
+  @load_to_dsr(dsr_mem_ctrl, ctrl_mem);
+  timestamp.get_timestamp(tsc_start_ptr);
+  while (rcvd_cnt < comptime recv_count(pe_id, rev_id)) {
     rcvd_cnt += 1;
-    fadds(mem, mem, fabin, out_color);
-    return;
+    @fadds(dsr_mem, dsr_mem, dsr_fabin);
   }
 
-  if (!snd_visited) {
-    snd_visited = true;
-    if (comptime recv_count(pe_id, rev_id) > 0 and pe_id > 0) {
-      fadds(fabout, mem, fabin, out_color);
-    } else if (comptime recv_count(pe_id, rev_id) == 0) {
-      mem_to_fabout(fabout, mem, out_color);
-    } else {
-      fadds(mem, mem, fabin, activate);
-    }
-    return;
+  if (comptime recv_count(pe_id, rev_id) > 0 and pe_id > 0) {
+    @fadds(dsr_fabout, dsr_mem, dsr_fabin);
+  } else if (comptime recv_count(pe_id, rev_id) == 0) {
+    @mov32(dsr_fabout, dsr_mem_src1);
+  } else {
+    @fadds(dsr_mem, dsr_mem, dsr_fabin);
   }
 
   if (is_ctrl) {
-    @mov32(ctrl, ctrl_mem, .{.async = true, .activate = activate});
+    @mov32(dsr_ctrl, dsr_mem_ctrl);
   }
 
   @activate(activate);

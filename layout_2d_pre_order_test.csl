@@ -1,6 +1,7 @@
 param Pw: u16;
+param Ph: u16;
 param step: u16;
-param Nx: u16;
+param Nx_start: u16;
 param Algo: u16;
 param is_allred: u16;
 
@@ -8,15 +9,16 @@ const LAUNCH: color = @get_color(8); // Color used by memcpy for kernel launch
 
 const memcpy = @import_module("<memcpy/get_params>", .{
   .width = Pw,
-  .height = 1,
+  .height = Ph,
   .LAUNCH = LAUNCH
 });
 
 layout {
-  @set_rectangle(Pw, 1);
-
+  @set_rectangle(Pw, Ph);
   for (@range(u16, Pw)) |Px| {
-    @set_tile_code(Px, 0, "code.csl", .{ .pe_id = Px, .Nx = Nx, .Pw = Pw, .algo = Algo, .memcpy_params = memcpy.get_params(Px), .is_allred=is_allred, .step = step});
+    for (@range(u16, Ph)) |Py| {
+      @set_tile_code(Px, Py, "code_2d_pre_order_test.csl", .{.Pw = Pw, .Ph=Ph, .Nx_start = Nx_start, .algo = Algo, .memcpy_params = memcpy.get_params(Px), .is_allred = is_allred, .step = step});
+    }
   }
 
   @export_name("x", [*]f32, true);

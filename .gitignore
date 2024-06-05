@@ -2,3 +2,15 @@ out/
 simfab_traces/
 results.txt
 wio_flow.json
+data.csv
+data_2d.csv
+data_pre_order.csv
+data_bcast.csv
+pre_order/
+layout_pre_order.csl
+simconfig.json
+data_1d.csv
+sim.log
+util.pyc
+results_1d.txt
+results_2d.txt

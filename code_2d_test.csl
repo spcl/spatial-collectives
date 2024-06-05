@@ -1,0 +1,159 @@
+const layout_module = @import_module("<layout>");
+param memcpy_params: comptime_struct;
+param Nx_start: u16;
+param Pw: u16;
+param Ph: u16;
+param algo: u16;
+param is_allred: u16;
+param step: u16;
+
+const sys_mod = @import_module("<memcpy/memcpy>", memcpy_params);
+const exit_task_id: local_task_id = @get_local_task_id(18);
+const bcast_right_id: local_task_id = @get_local_task_id(19);
+const finish_sync_id: local_task_id = @get_local_task_id(20);
+const timestamp = @import_module("modules/time.csl");
+var Nx: u16 = Nx_start;
+var cur_repeat: u16 = 0;
+var repeats: u16 = 5;
+
+const reduce_2d = @import_module("modules/2d_chain_runtime.csl", .{.color_1 = @get_color(10), .color_2 = @get_color(11), .M = Ph, .N = Pw, .timestamp = timestamp});
+const broadcast_2d = @import_module("modules/2d_broadcast_runtime.csl", .{.broadcast_color = @get_color(12), .M = Ph, .N = Pw, .timestamp = timestamp, .root_x = 0, .root_y = 0});
+
+const reduce_vertical = @import_module("modules/reduce_runtime.csl", .{.color_1 = @get_color(13), .color_2 = @get_color(14), .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = step, .algo = algo, .timestamp = timestamp, .rev=false, .is_x =true});
+
+const reduce_horizontal = @import_module("modules/reduce_runtime.csl", .{.color_1 = @get_color(15), .color_2 = @get_color(16), .POS_DIR = SOUTH, .NEG_DIR = NORTH, .NUM_PES = Ph, .step = step, .algo = algo, .timestamp = timestamp, .rev=false, .is_x = false});
+
+// tsc_size_words = 3
+// starting time of H2D/D2H
+var tscStartBuffer = @zeros([timestamp.tsc_size_words]u16);
+// ending time of H2D/D2H
+var tscEndBuffer = @zeros([timestamp.tsc_size_words]u16);
+var tscRefBuffer = @zeros([timestamp.tsc_size_words]u16);
+
+var time_buf_u16 = @zeros([timestamp.tsc_size_words*2]u16);
+var time_ref_u16 = @zeros([timestamp.tsc_size_words]u16);
+
+var ptr_time_buf_u16: [*]u16 = &time_buf_u16;
+var ptr_time_ref: [*]u16 = &time_ref_u16;
+
+var x = @constants([4096]f32, @as(f32, 1.0));
+var x_ptr: [*]f32 = &x;
+
+var dummy = @zeros([2048]f32);
+const dummy_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{2048} -> dummy[i]});
+var xd = @zeros([@as(u16, 1.334*@as(f32, (Ph + Pw)))]f32);
+var xd_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{1} -> xd[i]});
+var warmup_iter: u16 = 0;
+
+fn f_sync(n: i16) void {
+  timestamp.enable_tsc();
+  var id_x = layout_module.get_x_coord();
+  var id_y = layout_module.get_y_coord();
+  // best so far is: 1.334x, 1.334y
+  //xd_mem_dsd = @set_dsd_length(xd_mem_dsd, @as(u16, 1.334*@as(f32, (Ph - id_y)) + 1.334*@as(f32, (Pw - id_x))));
+  xd_mem_dsd = @set_dsd_length(xd_mem_dsd, @as(u16, 1.334*@as(f32, (Ph + Pw - id_y - id_x))));
+  reduce_2d.setup();
+  broadcast_2d.setup();
+  reduce_horizontal.setup();
+  reduce_vertical.setup();
+  i = 0;
+  if (cur_repeat == repeats) {
+    Nx *= 2;
+  }
+  cur_repeat %= repeats;
+  cur_repeat +=1;
+  // Perform chain reduce to synchronize all PEs
+  @fadds(dummy_mem_dsd, dummy_mem_dsd, 1.0);
+  @fadds(dummy_mem_dsd, dummy_mem_dsd, 1.0);
+  reduce_2d.transfer_data(&dummy, 2048, bcast_right_id, &tscEndBuffer);
+}
+
+task bcast_right() void {
+  if (warmup_iter == 0) {
+    warmup_iter += 1;
+    broadcast_2d.transfer_data(&dummy, 2048, bcast_right_id, &tscEndBuffer);
+  } else if (warmup_iter == 1) {
+    warmup_iter += 1;
+    broadcast_2d.transfer_data(&dummy, 2048, bcast_right_id, &tscEndBuffer);
+  } else if (warmup_iter == 2) {
+    warmup_iter += 1;
+    reduce_2d.transfer_data(&dummy, 2048, bcast_right_id, &tscEndBuffer);
+  } else if (warmup_iter == 3) {
+    broadcast_2d.transfer_data(&dummy, 2048, finish_sync_id, &tscEndBuffer);
+  }
+  
+}
+
+task finish_sync() void {
+  timestamp.get_timestamp(&tscRefBuffer);
+  delay();
+  compute();
+}
+
+// Function to delay the start of compute by some number of cycles in order for all PEs to start at a relatively similar time
+fn delay() void {
+  @fmovs(xd_mem_dsd, 1.0);
+}
+
+var i: u16 = 0;
+
+fn compute() void {
+  if (algo < 3) {
+    reduce_vertical.transfer_data(x_ptr, Nx, exit_task_id, &tscStartBuffer);
+  } else {
+    i = 1;
+    reduce_2d.transfer_data(x_ptr, Nx, exit_task_id, &tscStartBuffer);
+  }
+}
+
+task exit_task() void {
+  if (i == 0) {
+    i+= 1;
+    reduce_horizontal.transfer_data(x_ptr, Nx, exit_task_id, &tscEndBuffer);
+  } else if (i == 1 and is_allred == 1) {
+    i+= 1;
+    broadcast_2d.transfer_data(x_ptr, Nx, exit_task_id, &tscEndBuffer);
+  } else {
+    timestamp.get_timestamp(&tscEndBuffer);
+    sys_mod.unblock_cmd_stream();
+  }
+
+}
+
+fn f_memcpy_timestamps() void {
+
+  time_buf_u16[0] = tscStartBuffer[0];
+  time_buf_u16[1] = tscStartBuffer[1];
+  time_buf_u16[2] = tscStartBuffer[2];
+
+  time_buf_u16[3] = tscEndBuffer[0];
+  time_buf_u16[4] = tscEndBuffer[1];
+  time_buf_u16[5] = tscEndBuffer[2];
+
+  time_ref_u16[0] = tscRefBuffer[0];
+  time_ref_u16[1] = tscRefBuffer[1];
+  time_ref_u16[2] = tscRefBuffer[2];
+
+  sys_mod.unblock_cmd_stream();
+}
+
+comptime {
+  @bind_local_task(exit_task, exit_task_id);
+  @bind_local_task(bcast_right, bcast_right_id);
+  @bind_local_task(finish_sync, finish_sync_id);
+
+  broadcast_2d.configure_network();
+  reduce_2d.configure_network();
+  reduce_horizontal.configure_network();
+  reduce_vertical.configure_network();
+
+  @rpc(@get_data_task_id(sys_mod.LAUNCH));
+
+  @export_symbol(x_ptr, "x");
+  @export_symbol(ptr_time_buf_u16, "time_buf_u16");
+  @export_symbol(ptr_time_ref, "time_ref");
+
+  @export_symbol(compute);
+  @export_symbol(f_sync);
+  @export_symbol(f_memcpy_timestamps);
+}

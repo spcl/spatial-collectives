@@ -1,24 +1,29 @@
+const layout_module = @import_module("<layout>");
 param memcpy_params: comptime_struct;
-param pe_id: u16;
-param Nx: u16;
+param Nx_start: u16;
 param Pw: u16;
 param algo: u16;
 param is_allred: u16;
 param step: u16;
+param pe_id: u16;
+var is_all: u16 = is_allred;
 
 const sys_mod = @import_module("<memcpy/memcpy>", memcpy_params);
 const exit_task_id: local_task_id = @get_local_task_id(18);
 const bcast_right_id: local_task_id = @get_local_task_id(19);
 const finish_sync_id: local_task_id = @get_local_task_id(20);
 const timestamp = @import_module("modules/time.csl");
-
+var Nx: u16 = Nx_start;
+var cur_repeat: u16 = 0;
+var repeats: u16 = 5;
 
 const broadcast_right = @import_module("modules/broadcast.csl", .{.color_1 = @get_color(9), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw});
 
 const chain_reduce_left = @import_module("modules/reduce.csl", .{.color_1 = @get_color(10), .color_2 = @get_color(11), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = 8, .algo = 0, .timestamp = timestamp});
 
-const reduce = @import_module("modules/reduce.csl", .{.color_1 = @get_color(12), .color_2 = @get_color(13), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = step, .algo = algo, .timestamp = timestamp});
+const reduce = @import_module("modules/reduce_runtime.csl", .{.color_1 = @get_color(15), .color_2 = @get_color(16), .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .step = step, .algo = algo, .timestamp = timestamp, .rev=false, .is_x = true});
 
+const star = @import_module("modules/star_runtime.csl", .{.color_1 = @get_color(14), .pe_id = pe_id, .POS_DIR = EAST, .NEG_DIR = WEST, .NUM_PES = Pw, .timestamp = timestamp});
 
 // tsc_size_words = 3
 // starting time of H2D/D2H
@@ -33,26 +38,33 @@ var time_ref_u16 = @zeros([timestamp.tsc_size_words]u16);
 var ptr_time_buf_u16: [*]u16 = &time_buf_u16;
 var ptr_time_ref: [*]u16 = &time_ref_u16;
 
-var x = @constants([Nx]f32, @as(f32, 1.0));
+var x = @constants([4096]f32, @as(f32, 1.0));
 var x_ptr: [*]f32 = &x;
 
-var dummy = @zeros([4096]f32);
-const dummy_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{4096} -> dummy[i]});
-var xd = @zeros([2*(Pw - pe_id)]f32);
-// best so far is: 1.629x
-const xd_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{@as(u16,1.629*@as(f32,(Pw - pe_id)))} -> xd[i]});
-
-var i: u16 = 0;
+var dummy = @zeros([2048]f32);
+const dummy_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{2048} -> dummy[i]});
+var xd = @zeros([2*Pw]f32);
+var xd_mem_dsd = @get_dsd(mem1d_dsd, .{ .tensor_access = |i|{@as(u16,1.629*@as(f32,(Pw - pe_id)))} -> xd[i]});
+var warmup_iter: u16 = 0;
 
 fn f_sync(n: i16) void {
   timestamp.enable_tsc();
+  reduce.setup();
+  star.setup();
+  i = 0;
+  if (cur_repeat == repeats) {
+    is_all = 1;
+  }
+  cur_repeat %= repeats;
+  cur_repeat +=1;
   // Perform chain reduce to synchronize all PEs
   @fadds(dummy_mem_dsd, dummy_mem_dsd, 1.0);
-  chain_reduce_left.transfer_data(&dummy, 4096, bcast_right_id, &tscStartBuffer);
+  @fadds(dummy_mem_dsd, dummy_mem_dsd, 1.0);
+  chain_reduce_left.transfer_data(&dummy, 2048, bcast_right_id, &tscStartBuffer);
 }
 
 task bcast_right() void {
-  broadcast_right.transfer_data(&dummy, 4096, finish_sync_id);
+  broadcast_right.transfer_data(&dummy, 2048, finish_sync_id);
 }
 
 task finish_sync() void {
@@ -66,18 +78,29 @@ fn delay() void {
   @fmovs(xd_mem_dsd, 1.0);
 }
 
+var i: u16 = 0;
+
 fn compute() void {
-  reduce.transfer_data(x_ptr, Nx, exit_task_id, &tscStartBuffer);
+  if (algo < 3) {
+    reduce.transfer_data(x_ptr, Nx, exit_task_id, &tscStartBuffer);
+  } else {
+    if (Nx == 1) {
+      star.transfer_data_scalar(x_ptr, Nx, exit_task_id, &tscStartBuffer);
+    } else {
+      star.transfer_data(x_ptr, Nx, exit_task_id, &tscStartBuffer);
+    }
+  }
 }
 
 task exit_task() void {
-  if (i == 0 and is_allred == 1) {
+  if (i == 0 and is_all == 1) {
     i += 1;
     broadcast_right.transfer_data(x_ptr, Nx, exit_task_id);
   } else {
     timestamp.get_timestamp(&tscEndBuffer);
     sys_mod.unblock_cmd_stream();
   }
+
 }
 
 fn f_memcpy_timestamps() void {
@@ -104,7 +127,8 @@ comptime {
 
   broadcast_right.configure_network();
   chain_reduce_left.configure_network();
-  reduce.configure_network();
+  star.configure_network();
+
   @rpc(@get_data_task_id(sys_mod.LAUNCH));
 
   @export_symbol(x_ptr, "x");
